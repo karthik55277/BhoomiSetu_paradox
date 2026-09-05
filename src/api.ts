@@ -46,6 +46,15 @@ export type RiskExplanationResponse = RiskPredictionResponse & {
   decision_support_notice: string
 }
 
+export type ParcelAnalysis = {
+  prediction: RiskPredictionResponse
+  explanation: RiskExplanationResponse
+  timestamp: number
+}
+
+export type ParcelAnalysisCache = Record<string, ParcelAnalysis>
+
+
 export function formatFeatureName(feature: string): string {
   const labels: Record<string, string> = {
     ownership_complexity: 'Ownership complexity',
