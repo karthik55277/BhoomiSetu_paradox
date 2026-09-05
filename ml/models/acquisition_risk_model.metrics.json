@@ -1,0 +1,327 @@
+{
+  "model_name": "logistic_regression",
+  "model_version": "acquisition-risk-0.1.0",
+  "trained_at": "2026-09-05T14:44:36.395812+00:00",
+  "dataset": "ml\\data\\land_acquisition_dataset.csv",
+  "dataset_rows": 2400,
+  "features": [
+    "state",
+    "district",
+    "land_type",
+    "land_use",
+    "project_type",
+    "land_area",
+    "number_of_owners",
+    "ownership_complexity",
+    "previous_dispute",
+    "previous_objections",
+    "land_value",
+    "estimated_compensation",
+    "environmental_risk",
+    "road_accessibility",
+    "distance_to_road",
+    "stakeholder_count",
+    "land_use_conflict",
+    "documentation_completeness",
+    "historical_acquisition_duration"
+  ],
+  "split": {
+    "train": 1680,
+    "validation": 360,
+    "test": 360
+  },
+  "class_distribution": {
+    "0": 248,
+    "1": 1449,
+    "2": 587,
+    "3": 116
+  },
+  "xgboost_available": true,
+  "validation_benchmarks": {
+    "logistic_regression": {
+      "accuracy": 0.8333,
+      "precision_macro": 0.7794,
+      "recall_macro": 0.8666,
+      "f1_macro": 0.8152,
+      "confusion_matrix": [
+        [
+          34,
+          3,
+          0,
+          0
+        ],
+        [
+          15,
+          175,
+          27,
+          0
+        ],
+        [
+          0,
+          8,
+          75,
+          5
+        ],
+        [
+          0,
+          0,
+          2,
+          16
+        ]
+      ],
+      "classification_report": {
+        "0": {
+          "precision": 0.6938775510204082,
+          "recall": 0.918918918918919,
+          "f1-score": 0.7906976744186046,
+          "support": 37.0
+        },
+        "1": {
+          "precision": 0.9408602150537635,
+          "recall": 0.8064516129032258,
+          "f1-score": 0.8684863523573201,
+          "support": 217.0
+        },
+        "2": {
+          "precision": 0.7211538461538461,
+          "recall": 0.8522727272727273,
+          "f1-score": 0.78125,
+          "support": 88.0
+        },
+        "3": {
+          "precision": 0.7619047619047619,
+          "recall": 0.8888888888888888,
+          "f1-score": 0.8205128205128205,
+          "support": 18.0
+        },
+        "accuracy": 0.8333333333333334,
+        "macro avg": {
+          "precision": 0.7794490935331949,
+          "recall": 0.8666330369959402,
+          "f1-score": 0.8152367118221864,
+          "support": 360.0
+        },
+        "weighted avg": {
+          "precision": 0.8528221117506832,
+          "recall": 0.8333333333333334,
+          "f1-score": 0.8367682866229378,
+          "support": 360.0
+        }
+      }
+    },
+    "random_forest": {
+      "accuracy": 0.8167,
+      "precision_macro": 0.833,
+      "recall_macro": 0.7723,
+      "f1_macro": 0.7933,
+      "confusion_matrix": [
+        [
+          29,
+          8,
+          0,
+          0
+        ],
+        [
+          9,
+          183,
+          25,
+          0
+        ],
+        [
+          0,
+          18,
+          70,
+          0
+        ],
+        [
+          0,
+          0,
+          6,
+          12
+        ]
+      ],
+      "classification_report": {
+        "0": {
+          "precision": 0.7631578947368421,
+          "recall": 0.7837837837837838,
+          "f1-score": 0.7733333333333333,
+          "support": 37.0
+        },
+        "1": {
+          "precision": 0.8755980861244019,
+          "recall": 0.8433179723502304,
+          "f1-score": 0.8591549295774648,
+          "support": 217.0
+        },
+        "2": {
+          "precision": 0.693069306930693,
+          "recall": 0.7954545454545454,
+          "f1-score": 0.7407407407407407,
+          "support": 88.0
+        },
+        "3": {
+          "precision": 1.0,
+          "recall": 0.6666666666666666,
+          "f1-score": 0.8,
+          "support": 18.0
+        },
+        "accuracy": 0.8166666666666667,
+        "macro avg": {
+          "precision": 0.8329563219479843,
+          "recall": 0.7723057420638065,
+          "f1-score": 0.7933072509128847,
+          "support": 360.0
+        },
+        "weighted avg": {
+          "precision": 0.8256436827893315,
+          "recall": 0.8166666666666667,
+          "f1-score": 0.8184309395467455,
+          "support": 360.0
+        }
+      }
+    },
+    "xgboost": {
+      "accuracy": 0.825,
+      "precision_macro": 0.8944,
+      "recall_macro": 0.6665,
+      "f1_macro": 0.7377,
+      "confusion_matrix": [
+        [
+          21,
+          16,
+          0,
+          0
+        ],
+        [
+          0,
+          206,
+          11,
+          0
+        ],
+        [
+          0,
+          26,
+          62,
+          0
+        ],
+        [
+          0,
+          0,
+          10,
+          8
+        ]
+      ],
+      "classification_report": {
+        "0": {
+          "precision": 1.0,
+          "recall": 0.5675675675675675,
+          "f1-score": 0.7241379310344828,
+          "support": 37.0
+        },
+        "1": {
+          "precision": 0.8306451612903226,
+          "recall": 0.9493087557603687,
+          "f1-score": 0.886021505376344,
+          "support": 217.0
+        },
+        "2": {
+          "precision": 0.7469879518072289,
+          "recall": 0.7045454545454546,
+          "f1-score": 0.7251461988304093,
+          "support": 88.0
+        },
+        "3": {
+          "precision": 1.0,
+          "recall": 0.4444444444444444,
+          "f1-score": 0.6153846153846154,
+          "support": 18.0
+        },
+        "accuracy": 0.825,
+        "macro avg": {
+          "precision": 0.8944082782743878,
+          "recall": 0.6664665555794589,
+          "f1-score": 0.737672562656463,
+          "support": 360.0
+        },
+        "weighted avg": {
+          "precision": 0.8360692771084337,
+          "recall": 0.825,
+          "f1-score": 0.8165265519137268,
+          "support": 360.0
+        }
+      }
+    }
+  },
+  "test_metrics": {
+    "accuracy": 0.8306,
+    "precision_macro": 0.7678,
+    "recall_macro": 0.8561,
+    "f1_macro": 0.8023,
+    "confusion_matrix": [
+      [
+        35,
+        2,
+        0,
+        0
+      ],
+      [
+        18,
+        175,
+        25,
+        0
+      ],
+      [
+        0,
+        8,
+        75,
+        5
+      ],
+      [
+        0,
+        0,
+        3,
+        14
+      ]
+    ],
+    "classification_report": {
+      "0": {
+        "precision": 0.660377358490566,
+        "recall": 0.9459459459459459,
+        "f1-score": 0.7777777777777778,
+        "support": 37.0
+      },
+      "1": {
+        "precision": 0.9459459459459459,
+        "recall": 0.8027522935779816,
+        "f1-score": 0.8684863523573201,
+        "support": 218.0
+      },
+      "2": {
+        "precision": 0.7281553398058253,
+        "recall": 0.8522727272727273,
+        "f1-score": 0.7853403141361257,
+        "support": 88.0
+      },
+      "3": {
+        "precision": 0.7368421052631579,
+        "recall": 0.8235294117647058,
+        "f1-score": 0.7777777777777778,
+        "support": 17.0
+      },
+      "accuracy": 0.8305555555555556,
+      "macro avg": {
+        "precision": 0.7678301873763738,
+        "recall": 0.85612509464034,
+        "f1-score": 0.8023455555122503,
+        "support": 360.0
+      },
+      "weighted avg": {
+        "precision": 0.8534837893687598,
+        "recall": 0.8305555555555556,
+        "f1-score": 0.8345554790496523,
+        "support": 360.0
+      }
+    }
+  },
+  "synthetic_data_warning": "Metrics are from synthetic_demo data and are not evidence of real-world accuracy."
+}
