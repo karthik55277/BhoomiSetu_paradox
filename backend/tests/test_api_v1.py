@@ -241,3 +241,85 @@ def test_ml_predict_endpoint_compat():
     data = response.json()
     assert "risk_score" in data
     assert "risk_level" in data
+
+
+@skip_if_no_db
+def test_audit_live_stream_aggregation():
+    """
+    Test E2E audit trail aggregation across all workflows:
+    1. AI evaluation (AI_EVALUATION)
+    2. Dispute update (DISPUTE_UPDATE)
+    3. Compensation status update (COMPENSATION_UPDATE)
+    4. Document metadata creation (DOCUMENT_CREATE)
+    Verify GET /api/v1/audit returns all event types and chain_health is valid.
+    """
+    # 1. AI Evaluation
+    explain_payload = {
+        "parcel_id": "BR-042-0187",
+        "state": "Bihar",
+        "district": "Patna",
+        "land_type": "Agricultural",
+        "land_use": "Multi-crop",
+        "project_type": "Road infrastructure",
+        "land_area": 4.82,
+        "number_of_owners": 6.0,
+        "ownership_complexity": 4.2,
+        "previous_dispute": 1.0,
+        "previous_objections": 2.0,
+        "land_value": 18600000.0,
+        "estimated_compensation": 17856000.0,
+        "environmental_risk": 8.4,
+        "road_accessibility": 2.1,
+        "distance_to_road": 3.6,
+        "stakeholder_count": 6.0,
+        "land_use_conflict": 8.6,
+        "documentation_completeness": 5.1,
+        "historical_acquisition_duration": 7.2,
+    }
+    ai_res = client.post("/api/v1/ai/risk/explain?parcel_id=BR-042-0187", json=explain_payload)
+    assert ai_res.status_code == 200
+
+    # 2. Dispute Update
+    disp_res = client.get("/api/v1/disputes")
+    assert disp_res.status_code == 200
+    disp_id = disp_res.json()["items"][0]["id"]
+    disp_patch = client.patch(f"/api/v1/disputes/{disp_id}", json={"status": "In mediation"})
+    assert disp_patch.status_code == 200
+
+    # 3. Compensation Update
+    comp_res = client.get("/api/v1/compensation")
+    assert comp_res.status_code == 200
+    comp_id = comp_res.json()["items"][0]["id"]
+    comp_patch = client.patch(f"/api/v1/compensation/{comp_id}", json={"status": "Ready"})
+    assert comp_patch.status_code == 200
+
+    # 4. Document Creation
+    proj_res = client.get("/api/v1/projects/NH-327")
+    proj_id = proj_res.json()["id"]
+    doc_code = f"DOC-AGG-{os.urandom(2).hex()}"
+    doc_res = client.post("/api/v1/documents", json={
+        "document_code": doc_code,
+        "title": "Aggregated Stream Verification Doc",
+        "project_id": proj_id,
+        "category": "Survey Map",
+        "storage_path": "/storage/docs/agg.pdf",
+        "file_size_bytes": 50000,
+        "mime_type": "application/pdf",
+        "verification_status": "Verified",
+    })
+    assert doc_res.status_code == 201
+
+    # 5. GET /api/v1/audit
+    audit_res = client.get("/api/v1/audit?page_size=100")
+    assert audit_res.status_code == 200
+    data = audit_res.json()
+
+    assert data["chain_health"]["chain_valid"] is True
+    assert data["chain_health"]["event_count"] >= 4
+
+    action_types = {item["action_type"] for item in data["items"]}
+    assert "AI_EVALUATION" in action_types
+    assert "DISPUTE_UPDATE" in action_types
+    assert "COMPENSATION_UPDATE" in action_types
+    assert "DOCUMENT_CREATE" in action_types
+

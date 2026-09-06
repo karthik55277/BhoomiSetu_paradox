@@ -4,6 +4,7 @@ import {
   buildParcelRiskInput,
   createDocumentMetadata,
   explainRisk,
+  fetchAuditEvents,
   fetchCompensations,
   fetchDisputes,
   fetchDocuments,
@@ -18,6 +19,7 @@ import {
   mapApiCompensationToUi,
   mapApiDisputeToUi,
   mapApiDocumentToUi,
+  mapApiAuditEventToUi,
   mapGisFeatureToParcel,
   updateCompensation,
   updateDispute,
@@ -133,6 +135,10 @@ function App() {
 
     fetchDocuments()
       .then((res) => setDocuments(res.items.map(mapApiDocumentToUi)))
+      .catch(() => {})
+
+    fetchAuditEvents()
+      .then((res) => setAuditEvents(res.items.map(mapApiAuditEventToUi)))
       .catch(() => {})
   }, [])
 
@@ -462,7 +468,7 @@ function Page({
   if (route === '/disputes') return <DisputesView notify={notify} navigate={navigate} />
   if (route === '/compensation') return <CompensationView notify={notify} />
   if (route === '/documents') return <DocumentsView notify={notify} />
-  if (route === '/audit') return <AuditView auditEvents={auditEvents} />
+  if (route === '/audit') return <AuditView />
   if (route === '/analytics') return <AnalyticsView aiCache={aiCache} disputes={disputes} compensations={compensations} />
   if (route === '/settings') return <SettingsView notify={notify} />
   return <Dashboard navigate={navigate} openParcel={openParcel} aiCache={aiCache} disputes={disputes} compensations={compensations} auditEvents={auditEvents} />
@@ -2656,49 +2662,169 @@ function DocumentsView({ notify }: { notify: (s: string) => void }) {
   )
 }
 
-function AuditView({ auditEvents }: { auditEvents: AuditEvent[] }) {
+function AuditView() {
   const [query, setQuery] = useState('')
+  const [actionFilter, setActionFilter] = useState('All')
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([])
+  const [chainHealth, setChainHealth] = useState<{ event_count: number; latest_hash: string; chain_valid: boolean } | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({})
 
-  const filtered = auditEvents.filter((a) => `${a.title} ${a.actor} ${a.payloadHash} ${a.parcelId ?? ''}`.toLowerCase().includes(query.toLowerCase()))
+  const loadAudit = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetchAuditEvents({
+        search: query.trim() || undefined,
+        action_type: actionFilter !== 'All' ? actionFilter : undefined,
+      })
+      setAuditEvents(res.items.map(mapApiAuditEventToUi))
+      setChainHealth(res.chain_health)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch audit trail')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadAudit()
+  }, [query, actionFilter])
+
+  const togglePayload = (id: string) => {
+    setExpandedIds((prev) => ({ ...prev, [id]: !prev[id] }))
+  }
 
   return (
     <>
-      <Heading title="Tamper-Evident Audit Trail" subtitle="Cryptographic hash log of acquisition workflow events." />
+      <div className="demo-badge live" style={{ marginBottom: '12px' }}>
+        <span className="live-dot"></span> POSTGRES LIVE API
+      </div>
+      <Heading
+        title="Tamper-Evident Audit Trail"
+        subtitle="Cryptographic SHA-256 hash chain log of land acquisition workflow events."
+      />
 
-      <div className="audit-health">
-        <ShieldCheck size={20} />
+      <div className="audit-health" style={{ borderColor: chainHealth?.chain_valid ? '#54a884' : '#df765b' }}>
+        <ShieldCheck size={20} style={{ color: chainHealth?.chain_valid ? '#54a884' : '#df765b' }} />
         <div>
-          <strong>Hash Chain Healthy (Demo Chain)</strong>
-          <span>All {auditEvents.length} recorded events verified · Last checked 09:38 IST</span>
+          <strong>
+            {chainHealth ? (chainHealth.chain_valid ? 'Cryptographic Hash Chain Valid' : 'Hash Chain Tampered / Broken') : 'Checking Hash Chain...'}
+          </strong>
+          <span>
+            {chainHealth
+              ? `All ${chainHealth.event_count} workflow events cryptographically verified · Latest Hash: ${chainHealth.latest_hash.substring(0, 16)}...`
+              : 'Verifying SHA-256 signatures in PostgreSQL...'}
+          </span>
         </div>
-        <span className="status-label">VERIFIED</span>
+        <span className="status-label" style={{ background: chainHealth?.chain_valid ? '#54a884' : '#df765b' }}>
+          {chainHealth?.chain_valid ? 'VERIFIED' : 'INVALID'}
+        </span>
       </div>
 
       <div className="table-tools">
         <div className="inline-search">
           <Search size={15} />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search audit events, actor, or payload hash..." />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search event code, title, or actor name..."
+          />
         </div>
+        <select value={actionFilter} onChange={(e) => setActionFilter(e.target.value)}>
+          <option>All</option>
+          <option value="AI_EVALUATION">AI Evaluation</option>
+          <option value="DISPUTE_UPDATE">Dispute Update</option>
+          <option value="COMPENSATION_UPDATE">Compensation Update</option>
+          <option value="DOCUMENT_CREATE">Document Create</option>
+          <option value="PARCEL_STATUS_UPDATE">Parcel Status Update</option>
+          <option value="NOTICE_ISSUANCE">Notice Issuance</option>
+          <option value="VALUATION_APPROVAL">Valuation Approval</option>
+        </select>
+        <Button className="outline-button" onClick={loadAudit} title="Refresh Audit Trail">
+          <RefreshCw size={14} className={loading ? 'spinning' : ''} />
+        </Button>
       </div>
 
       <div className="panel audit-list">
-        {filtered.map((event, i) => (
-          <div key={event.id}>
-            <span className="audit-hash">{i + 1}</span>
-            <span>
-              <strong>{event.title}</strong>
-              <small>
-                {event.actor} · {event.timestamp} · payload hash <code>{event.payloadHash}</code>
-              </small>
-            </span>
-            <CheckCircle2 size={15} />
+        {loading ? (
+          <div className="empty-state">
+            <RefreshCw size={20} className="spinning" />
+            <strong>Loading audit events from PostgreSQL...</strong>
           </div>
-        ))}
-        {filtered.length === 0 && (
+        ) : error ? (
+          <div className="empty-state error">
+            <AlertTriangle size={20} />
+            <strong>Failed to load audit trail</strong>
+            <span>{error}</span>
+            <Button className="outline-button" onClick={loadAudit}>
+              Retry
+            </Button>
+          </div>
+        ) : auditEvents.length === 0 ? (
           <div className="empty-state">
             <ShieldCheck size={20} />
             <strong>No audit events found matching query</strong>
           </div>
+        ) : (
+          auditEvents.map((event) => {
+            const isExpanded = !!expandedIds[event.id]
+            return (
+              <div key={event.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '14px 18px', borderBottom: '1px solid #e1e9e8' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span className="audit-hash">{event.id}</span>
+                    <div>
+                      <strong>{event.title}</strong>
+                      <div style={{ fontSize: '11px', color: '#687876', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>{event.actor}</span>
+                        <span>·</span>
+                        <span>{event.timestamp}</span>
+                        {event.actionType && (
+                          <span className="risk-pill low" style={{ fontSize: '9px', padding: '1px 6px' }}>
+                            {event.actionType}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <Button
+                      className="outline-button"
+                      onClick={() => togglePayload(event.id)}
+                      style={{ fontSize: '10px', padding: '2px 8px' }}
+                    >
+                      {isExpanded ? 'Hide Payload' : 'View Payload'}
+                    </Button>
+                    <CheckCircle2 size={16} style={{ color: '#54a884' }} />
+                  </div>
+                </div>
+
+                <div style={{ fontSize: '10px', color: '#8a9998', fontFamily: 'monospace', background: '#f5f8f8', padding: '6px 10px', borderRadius: '4px' }}>
+                  <div>Current Hash: <code>{event.currentHash || event.payloadHash}</code></div>
+                  {event.prevHash && (
+                    <div style={{ marginTop: '2px' }}>Previous Hash: <code>{event.prevHash}</code></div>
+                  )}
+                </div>
+
+                {isExpanded && event.payload && (
+                  <pre style={{
+                    fontSize: '11px',
+                    background: '#1e292b',
+                    color: '#aedccf',
+                    padding: '12px',
+                    borderRadius: '6px',
+                    overflowX: 'auto',
+                    margin: '6px 0 0 0',
+                    fontFamily: 'monospace',
+                  }}>
+                    {JSON.stringify(event.payload, null, 2)}
+                  </pre>
+                )}
+              </div>
+            )
+          })
         )}
       </div>
     </>

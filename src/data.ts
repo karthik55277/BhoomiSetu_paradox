@@ -62,6 +62,7 @@ export type DocumentRecord = {
 
 export type AuditEvent = {
   id: string
+  dbId?: string
   title: string
   parcelId?: string
   projectId?: string
@@ -69,6 +70,11 @@ export type AuditEvent = {
   timestamp: string
   payloadHash: string
   status: 'VERIFIED'
+  actionType?: string
+  entityTable?: string
+  currentHash?: string
+  prevHash?: string
+  payload?: Record<string, any>
 }
 
 export const parcels: Parcel[] = [
