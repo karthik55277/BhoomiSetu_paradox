@@ -3,6 +3,8 @@ import { Activity, AlertTriangle, ArrowLeft, ArrowRight, Bell, Check, CheckCircl
 import {
   buildParcelRiskInput,
   explainRisk,
+  fetchCompensations,
+  fetchDisputes,
   fetchGisParcels,
   fetchParcelAiHistory,
   fetchParcelDetail,
@@ -10,7 +12,12 @@ import {
   fetchProjectByCode,
   fetchProjects,
   formatFeatureName,
+  getNextCompensationStatus,
+  mapApiCompensationToUi,
+  mapApiDisputeToUi,
   mapGisFeatureToParcel,
+  updateCompensation,
+  updateDispute,
   type ApiAiAnalysisRecord,
   type ApiGeoJSONFeature,
   type ApiParcelDetailResponse,
@@ -109,6 +116,16 @@ function App() {
     setToast(message)
     window.setTimeout(() => setToast(''), 2800)
   }
+
+  useEffect(() => {
+    fetchDisputes()
+      .then((res) => setDisputes(res.items.map(mapApiDisputeToUi)))
+      .catch(() => {})
+
+    fetchCompensations()
+      .then((res) => setCompensations(res.items.map(mapApiCompensationToUi)))
+      .catch(() => {})
+  }, [])
 
   // Central AI Fetcher with Shared Cache
   const getOrFetchParcelAnalysis = async (parcel: Parcel, forceRefresh = false): Promise<ParcelAnalysis> => {
@@ -346,13 +363,10 @@ function App() {
             getOrFetchParcelAnalysis={getOrFetchParcelAnalysis}
             analyzingMap={analyzingMap}
             disputes={disputes}
-            setDisputes={setDisputes}
             compensations={compensations}
-            setCompensations={setCompensations}
             documents={documents}
             setDocuments={setDocuments}
             auditEvents={auditEvents}
-            setAuditEvents={setAuditEvents}
             gisLayers={gisLayers}
             setGisLayers={setGisLayers}
             selectedProjectTab={selectedProjectTab}
@@ -380,13 +394,10 @@ function Page({
   getOrFetchParcelAnalysis,
   analyzingMap,
   disputes,
-  setDisputes,
   compensations,
-  setCompensations,
   documents,
   setDocuments,
   auditEvents,
-  setAuditEvents,
   gisLayers,
   setGisLayers,
   selectedProjectTab,
@@ -402,13 +413,10 @@ function Page({
   getOrFetchParcelAnalysis: (p: Parcel, force?: boolean) => Promise<ParcelAnalysis>
   analyzingMap: Record<string, boolean>
   disputes: DisputeRecord[]
-  setDisputes: React.Dispatch<React.SetStateAction<DisputeRecord[]>>
   compensations: CompensationRecord[]
-  setCompensations: React.Dispatch<React.SetStateAction<CompensationRecord[]>>
   documents: DocumentRecord[]
   setDocuments: React.Dispatch<React.SetStateAction<DocumentRecord[]>>
   auditEvents: AuditEvent[]
-  setAuditEvents: React.Dispatch<React.SetStateAction<AuditEvent[]>>
   gisLayers: { landBoundary: boolean; riverBuffer: boolean; roadCorridor: boolean; highRiskOverlay: boolean }
   setGisLayers: React.Dispatch<React.SetStateAction<{ landBoundary: boolean; riverBuffer: boolean; roadCorridor: boolean; highRiskOverlay: boolean }>>
   selectedProjectTab: Record<string, string>
@@ -443,11 +451,10 @@ function Page({
   if (route === '/projects') return <Projects notify={notify} navigate={navigate} />
   if (route.startsWith('/disputes/')) {
     const dispId = route.split('/')[2]
-    const dispute = disputes.find((d) => d.id === dispId) || disputes[0]
-    return <DisputeDetail dispute={dispute} setDisputes={setDisputes} setAuditEvents={setAuditEvents} notify={notify} navigate={navigate} />
+    return <DisputeDetail disputeId={dispId} notify={notify} navigate={navigate} />
   }
-  if (route === '/disputes') return <DisputesView disputes={disputes} notify={notify} navigate={navigate} />
-  if (route === '/compensation') return <CompensationView compensations={compensations} setCompensations={setCompensations} notify={notify} />
+  if (route === '/disputes') return <DisputesView notify={notify} navigate={navigate} />
+  if (route === '/compensation') return <CompensationView notify={notify} />
   if (route === '/documents') return <DocumentsView documents={documents} setDocuments={setDocuments} notify={notify} />
   if (route === '/audit') return <AuditView auditEvents={auditEvents} />
   if (route === '/analytics') return <AnalyticsView aiCache={aiCache} disputes={disputes} compensations={compensations} />
@@ -1950,31 +1957,61 @@ function ProjectDetail({
 }
 
 function DisputesView({
-  disputes,
   notify,
   navigate,
 }: {
-  disputes: DisputeRecord[]
   notify: (s: string) => void
   navigate: (s: string) => void
 }) {
   const [query, setQuery] = useState('')
   const [filterStatus, setFilterStatus] = useState('All')
+  const [disputes, setDisputes] = useState<DisputeRecord[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  const filtered = disputes.filter((d) => {
-    const matchesSearch = `${d.id} ${d.parcelId} ${d.category} ${d.assignedTo}`.toLowerCase().includes(query.toLowerCase())
-    const matchesStatus = filterStatus === 'All' || d.status === filterStatus
-    return matchesSearch && matchesStatus
-  })
+  const loadDisputes = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetchDisputes({
+        search: query.trim() || undefined,
+        status: filterStatus !== 'All' ? filterStatus : undefined,
+      })
+      setDisputes(res.items.map(mapApiDisputeToUi))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch disputes')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadDisputes()
+  }, [query, filterStatus])
 
   return (
     <>
-      <Heading title="Disputes & Objections" subtitle="Review, assign, and resolve land acquisition objections across active projects." action={<Button className="primary-button" onClick={() => notify('New dispute form: Contact district legal cell')}>+ File New Objection</Button>} />
+      <div className="demo-badge live" style={{ marginBottom: '12px' }}>
+        <span className="live-dot"></span> POSTGRES LIVE API
+      </div>
+      <Heading
+        title="Disputes & Objections"
+        subtitle="Review, assign, and resolve land acquisition objections across active projects."
+        action={
+          <Button className="primary-button" onClick={() => notify('New dispute form: Contact district legal cell')}>
+            + File New Objection
+          </Button>
+        }
+      />
 
       <div className="table-tools">
         <div className="inline-search">
           <Search size={15} />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search dispute ID, parcel ID, category, or officer..." />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search dispute ID, parcel ID, category, or officer..."
+          />
         </div>
         <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
           <option>All</option>
@@ -1983,38 +2020,56 @@ function DisputesView({
           <option>In mediation</option>
           <option>Resolved</option>
         </select>
+        <Button className="outline-button" onClick={loadDisputes} title="Refresh">
+          <RefreshCw size={14} className={loading ? 'spinning' : ''} />
+        </Button>
       </div>
 
       <div className="record-layout">
         <div className="panel record-list">
-          {filtered.map((d) => (
-            <Button key={d.id} onClick={() => navigate(`/disputes/${d.id}`)}>
-              <span className={`record-icon ${d.status === 'Resolved' ? 'blue' : 'red'}`}>
-                <AlertTriangle size={15} />
-              </span>
-              <span>
-                <strong>
-                  {d.id} · {d.category}
-                </strong>
-                <small>
-                  Parcel {d.parcelId} · Assigned to {d.assignedTo} · {d.status}
-                </small>
-              </span>
-              <ArrowRight size={15} />
-            </Button>
-          ))}
-          {filtered.length === 0 && (
+          {loading ? (
+            <div className="empty-state">
+              <RefreshCw size={20} className="spinning" />
+              <strong>Loading disputes from PostgreSQL...</strong>
+            </div>
+          ) : error ? (
+            <div className="empty-state error">
+              <AlertTriangle size={20} />
+              <strong>Failed to load disputes</strong>
+              <span>{error}</span>
+              <Button className="outline-button" onClick={loadDisputes}>
+                Retry
+              </Button>
+            </div>
+          ) : disputes.length === 0 ? (
             <div className="empty-state">
               <AlertTriangle size={20} />
               <strong>No disputes found matching filter</strong>
             </div>
+          ) : (
+            disputes.map((d) => (
+              <Button key={d.id} onClick={() => navigate(`/disputes/${d.id}`)}>
+                <span className={`record-icon ${d.status === 'Resolved' ? 'blue' : 'red'}`}>
+                  <AlertTriangle size={15} />
+                </span>
+                <span>
+                  <strong>
+                    {d.id} · {d.category}
+                  </strong>
+                  <small>
+                    Parcel {d.parcelId} · Assigned to {d.assignedTo} · {d.status}
+                  </small>
+                </span>
+                <ArrowRight size={15} />
+              </Button>
+            ))
           )}
         </div>
 
         <div className="panel empty-state">
           <ShieldCheck size={25} />
           <strong>Select a dispute record to inspect details</strong>
-          <span>Review legal claims, reassign officers, or mark objections resolved in demo session state.</span>
+          <span>Review legal claims, reassign officers, or mark objections resolved in PostgreSQL live state.</span>
         </div>
       </div>
     </>
@@ -2022,44 +2077,92 @@ function DisputesView({
 }
 
 function DisputeDetail({
-  dispute,
-  setDisputes,
-  setAuditEvents,
+  disputeId,
   notify,
   navigate,
 }: {
-  dispute: DisputeRecord
-  setDisputes: React.Dispatch<React.SetStateAction<DisputeRecord[]>>
-  setAuditEvents: React.Dispatch<React.SetStateAction<AuditEvent[]>>
+  disputeId: string
   notify: (s: string) => void
   navigate: (s: string) => void
 }) {
-  const toggleResolve = () => {
-    const nextStatus: DisputeRecord['status'] = dispute.status === 'Resolved' ? 'Under review' : 'Resolved'
-    setDisputes((prev) => prev.map((d) => (d.id === dispute.id ? { ...d, status: nextStatus } : d)))
+  const [dispute, setDispute] = useState<DisputeRecord | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [updating, setUpdating] = useState(false)
 
-    if (nextStatus === 'Resolved') {
-      setAuditEvents((prev) => [
-        {
-          id: `AUD-${Date.now().toString().slice(-4)}`,
-          title: `Dispute ${dispute.id} resolved by District Officer`,
-          parcelId: dispute.parcelId,
-          projectId: dispute.projectId,
-          actor: 'Anil Kumar',
-          timestamp: `${new Date().toLocaleDateString()} · ${new Date().toLocaleTimeString()} IST`,
-          payloadHash: Math.random().toString(16).substring(2, 14),
-          status: 'VERIFIED',
-        },
-        ...prev,
-      ])
+  const loadDispute = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetchDisputes({ search: disputeId })
+      const found = res.items.find(
+        (item) => item.dispute_code === disputeId || item.id === disputeId
+      ) || res.items[0]
+
+      if (found) {
+        setDispute(mapApiDisputeToUi(found))
+      } else {
+        setError(`Dispute '${disputeId}' not found`)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch dispute detail')
+    } finally {
+      setLoading(false)
     }
+  }
 
-    notify(`Dispute ${dispute.id} status updated to ${nextStatus}`)
+  useEffect(() => {
+    loadDispute()
+  }, [disputeId])
+
+  const handleUpdate = async (payload: { status?: string; priority?: string }) => {
+    if (!dispute) return
+    setUpdating(true)
+    try {
+      const updated = await updateDispute(dispute.dbId || dispute.id, payload)
+      const mapped = mapApiDisputeToUi(updated)
+      setDispute(mapped)
+      notify(`Dispute ${mapped.id} updated (Status: ${mapped.status}, Priority: ${mapped.priority}) · SHA-256 Audit Recorded`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to update dispute'
+      notify(`Error updating dispute: ${msg}`)
+    } finally {
+      setUpdating(false)
+    }
+  }
+
+  const toggleResolve = () => {
+    if (!dispute) return
+    const nextStatus = dispute.status === 'Resolved' ? 'Under review' : 'Resolved'
+    handleUpdate({ status: nextStatus })
   }
 
   const changePriority = (p: 'HIGH' | 'MEDIUM' | 'LOW') => {
-    setDisputes((prev) => prev.map((d) => (d.id === dispute.id ? { ...d, priority: p } : d)))
-    notify(`Dispute ${dispute.id} priority set to ${p}`)
+    handleUpdate({ priority: p })
+  }
+
+  if (loading) {
+    return (
+      <div className="panel empty-state">
+        <RefreshCw size={25} className="spinning" />
+        <strong>Loading dispute detail from PostgreSQL...</strong>
+      </div>
+    )
+  }
+
+  if (error || !dispute) {
+    return (
+      <>
+        <Button className="back-button" onClick={() => navigate('/disputes')}>
+          <ArrowLeft size={15} /> Back to disputes list
+        </Button>
+        <div className="panel empty-state error">
+          <AlertTriangle size={25} />
+          <strong>Error loading dispute</strong>
+          <span>{error}</span>
+        </div>
+      </>
+    )
   }
 
   return (
@@ -2067,13 +2170,17 @@ function DisputeDetail({
       <Button className="back-button" onClick={() => navigate('/disputes')}>
         <ArrowLeft size={15} /> Back to disputes list
       </Button>
+      <div className="demo-badge live" style={{ marginBottom: '12px' }}>
+        <span className="live-dot"></span> POSTGRES LIVE API
+      </div>
       <Heading
-        eyebrow="DISPUTE DETAIL · DEMO SESSION STATE"
+        eyebrow={`DISPUTE DETAIL · POSTGRES DB ID: ${dispute.dbId || 'N/A'}`}
         title={`Objection ${dispute.id}`}
         subtitle={`${dispute.category} · Parcel ${dispute.parcelId} · Project ${dispute.projectId}`}
         action={
-          <Button className="primary-button" onClick={toggleResolve}>
-            {dispute.status === 'Resolved' ? 'Re-open Dispute' : 'Mark Resolved'} <Check size={14} />
+          <Button className="primary-button" onClick={toggleResolve} disabled={updating}>
+            {updating ? 'Updating...' : dispute.status === 'Resolved' ? 'Re-open Dispute' : 'Mark Resolved'}{' '}
+            <Check size={14} />
           </Button>
         }
       />
@@ -2083,7 +2190,7 @@ function DisputeDetail({
           <div className="panel-head">
             <div>
               <h3>Objection Summary</h3>
-              <p>Submitted on {dispute.date}</p>
+              <p>Filed on {dispute.date}</p>
             </div>
             <span className={`risk-pill ${dispute.status === 'Resolved' ? 'low' : 'high'}`}>{dispute.status}</span>
           </div>
@@ -2095,68 +2202,114 @@ function DisputeDetail({
             <Field label="Assigned Officer" value={dispute.assignedTo} />
             <Field label="Priority Level" value={dispute.priority} />
             <Field label="Status" value={dispute.status} />
+            {dispute.resolvedAt && (
+              <Field label="Resolved At" value={new Date(dispute.resolvedAt).toLocaleString()} />
+            )}
           </div>
 
           <div style={{ padding: '0 19px 19px' }}>
-            <small style={{ color: '#8a9998', fontSize: '9px', display: 'block', marginBottom: '4px' }}>Claim Description</small>
+            <small style={{ color: '#8a9998', fontSize: '9px', display: 'block', marginBottom: '4px' }}>
+              Claim Description
+            </small>
             <p style={{ margin: 0, fontSize: '11px', color: '#3d5b60', lineHeight: 1.4 }}>{dispute.description}</p>
           </div>
 
           <div style={{ padding: '0 19px 19px', display: 'flex', gap: '10px' }}>
-            <Button className="outline-button" onClick={() => changePriority('HIGH')}>Set Priority High</Button>
-            <Button className="outline-button" onClick={() => changePriority('MEDIUM')}>Set Priority Medium</Button>
+            <Button className="outline-button" onClick={() => changePriority('HIGH')} disabled={updating}>
+              Set Priority High
+            </Button>
+            <Button className="outline-button" onClick={() => changePriority('MEDIUM')} disabled={updating}>
+              Set Priority Medium
+            </Button>
           </div>
         </div>
 
         <div className="panel empty-state">
           <ShieldCheck size={25} />
           <strong>Audit History & Legal Logs</strong>
-          <span>Created on {dispute.date} · Priority: {dispute.priority} · Current Status: {dispute.status}</span>
+          <span>
+            Filed on {dispute.date} · Priority: {dispute.priority} · Current Status: {dispute.status}
+          </span>
+          <span style={{ fontSize: '11px', color: '#4d8076', marginTop: '8px' }}>
+            ✓ Status and priority changes are cryptographically hashed and logged to PostgreSQL audit_events on commit.
+          </span>
         </div>
       </div>
     </>
   )
 }
 
-function CompensationView({
-  compensations,
-  setCompensations,
-  notify,
-}: {
-  compensations: CompensationRecord[]
-  setCompensations: React.Dispatch<React.SetStateAction<CompensationRecord[]>>
-  notify: (s: string) => void
-}) {
+function CompensationView({ notify }: { notify: (s: string) => void }) {
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
+  const [compensations, setCompensations] = useState<CompensationRecord[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [updatingId, setUpdatingId] = useState<string | null>(null)
 
-  const filtered = compensations.filter((c) => {
-    const matchesSearch = `${c.id} ${c.parcelId} ${c.payee}`.toLowerCase().includes(query.toLowerCase())
-    const matchesStatus = statusFilter === 'All' || c.status === statusFilter
-    return matchesSearch && matchesStatus
-  })
+  const loadCompensations = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetchCompensations({
+        search: query.trim() || undefined,
+        status: statusFilter !== 'All' ? statusFilter : undefined,
+      })
+      setCompensations(res.items.map(mapApiCompensationToUi))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch compensation records')
+    } finally {
+      setLoading(false)
+    }
+  }
 
-  const cycleStatus = (id: string) => {
-    setCompensations((prev) =>
-      prev.map((c) => {
-        if (c.id !== id) return c
-        const order: CompensationRecord['status'][] = ['Pending approval', 'Processing', 'Ready', 'Released']
-        const nextIdx = (order.indexOf(c.status) + 1) % order.length
-        const nextStatus = order[nextIdx]
-        notify(`Compensation record ${c.id} updated to ${nextStatus}`)
-        return { ...c, status: nextStatus }
-      }),
-    )
+  useEffect(() => {
+    loadCompensations()
+  }, [query, statusFilter])
+
+  const cycleStatus = async (record: CompensationRecord) => {
+    const nextStatus = getNextCompensationStatus(record.status)
+    const dbId = record.dbId || record.id
+    setUpdatingId(record.id)
+
+    try {
+      const res = await updateCompensation(dbId, { status: nextStatus })
+      const updatedUi = mapApiCompensationToUi(res)
+      setCompensations((prev) =>
+        prev.map((c) => (c.id === record.id || c.dbId === dbId ? updatedUi : c))
+      )
+      notify(`Compensation ${updatedUi.id} updated to ${updatedUi.status} · SHA-256 Audit Recorded`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to update status'
+      notify(`Error updating compensation ${record.id}: ${msg}`)
+    } finally {
+      setUpdatingId(null)
+    }
   }
 
   return (
     <>
-      <Heading title="Compensation Tracking Queue" subtitle="Monitor valuation approvals and disbursement status across parcels." action={<Button className="primary-button" onClick={() => notify('Batch payout export generated')}>Export Payout Schedule</Button>} />
+      <div className="demo-badge live" style={{ marginBottom: '12px' }}>
+        <span className="live-dot"></span> POSTGRES LIVE API
+      </div>
+      <Heading
+        title="Compensation Tracking Queue"
+        subtitle="Monitor valuation approvals and disbursement status across parcels in real time."
+        action={
+          <Button className="primary-button" onClick={() => notify('Batch payout export generated')}>
+            Export Payout Schedule
+          </Button>
+        }
+      />
 
       <div className="table-tools">
         <div className="inline-search">
           <Search size={15} />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search compensation ID, parcel ID, or payee name..." />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search compensation ID, parcel ID, or payee name..."
+          />
         </div>
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
           <option>All</option>
@@ -2165,43 +2318,78 @@ function CompensationView({
           <option>Ready</option>
           <option>Released</option>
         </select>
+        <Button className="outline-button" onClick={loadCompensations} title="Refresh">
+          <RefreshCw size={14} className={loading ? 'spinning' : ''} />
+        </Button>
       </div>
 
       <div className="panel table-panel">
-        <table>
-          <thead>
-            <tr>
-              <th>Record ID</th>
-              <th>Parcel ID</th>
-              <th>Payee Name</th>
-              <th>Amount</th>
-              <th>Disbursement Status</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((c) => (
-              <tr key={c.id}>
-                <td>
-                  <strong>{c.id}</strong>
-                </td>
-                <td>{c.parcelId}</td>
-                <td>{c.payee}</td>
-                <td>
-                  <strong>{c.amount}</strong>
-                </td>
-                <td>
-                  <span className={`risk-pill ${c.status === 'Released' ? 'low' : c.status === 'Ready' ? 'info' : 'medium'}`}>{c.status}</span>
-                </td>
-                <td>
-                  <Button className="outline-button" onClick={() => cycleStatus(c.id)}>
-                    Advance Status
-                  </Button>
-                </td>
+        {loading ? (
+          <div className="empty-state">
+            <RefreshCw size={20} className="spinning" />
+            <strong>Loading compensation records from PostgreSQL...</strong>
+          </div>
+        ) : error ? (
+          <div className="empty-state error">
+            <AlertTriangle size={20} />
+            <strong>Failed to load compensations</strong>
+            <span>{error}</span>
+            <Button className="outline-button" onClick={loadCompensations}>
+              Retry
+            </Button>
+          </div>
+        ) : compensations.length === 0 ? (
+          <div className="empty-state">
+            <AlertTriangle size={20} />
+            <strong>No compensation records found</strong>
+          </div>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Record ID</th>
+                <th>Parcel ID</th>
+                <th>Payee Name</th>
+                <th>Amount</th>
+                <th>Disbursement Status</th>
+                <th>Action</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {compensations.map((c) => (
+                <tr key={c.id}>
+                  <td>
+                    <strong>{c.id}</strong>
+                  </td>
+                  <td>{c.parcelId}</td>
+                  <td>{c.payee}</td>
+                  <td>
+                    <strong>{c.amount}</strong>
+                  </td>
+                  <td>
+                    <span className={`risk-pill ${c.status === 'Released' ? 'low' : c.status === 'Ready' ? 'info' : 'medium'}`}>
+                      {c.status}
+                    </span>
+                    {c.disbursedAt && (
+                      <small style={{ display: 'block', fontSize: '10px', color: '#54a884', marginTop: '2px' }}>
+                        Disbursed: {new Date(c.disbursedAt).toLocaleDateString()}
+                      </small>
+                    )}
+                  </td>
+                  <td>
+                    <Button
+                      className="outline-button"
+                      onClick={() => cycleStatus(c)}
+                      disabled={updatingId === c.id}
+                    >
+                      {updatingId === c.id ? 'Updating...' : 'Advance Status'}
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </>
   )

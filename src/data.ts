@@ -20,6 +20,7 @@ export type Parcel = {
 
 export type DisputeRecord = {
   id: string
+  dbId?: string
   parcelId: string
   projectId: string
   category: string
@@ -28,10 +29,13 @@ export type DisputeRecord = {
   priority: 'HIGH' | 'MEDIUM' | 'LOW'
   description: string
   date: string
+  filedDate?: string
+  resolvedAt?: string
 }
 
 export type CompensationRecord = {
   id: string
+  dbId?: string
   parcelId: string
   projectId: string
   amount: string
@@ -39,6 +43,7 @@ export type CompensationRecord = {
   payee: string
   status: 'Pending approval' | 'Processing' | 'Ready' | 'Released'
   date: string
+  disbursedAt?: string
 }
 
 export type DocumentRecord = {
