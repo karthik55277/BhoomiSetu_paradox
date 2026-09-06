@@ -3,12 +3,15 @@ import { Activity, AlertTriangle, ArrowLeft, ArrowRight, Bell, Check, CheckCircl
 import {
   buildParcelRiskInput,
   explainRisk,
+  fetchGisParcels,
   fetchParcelDetail,
   fetchParcels,
   fetchProjectByCode,
   fetchProjects,
   formatFeatureName,
+  mapGisFeatureToParcel,
   predictRisk,
+  type ApiGeoJSONFeature,
   type ApiParcelDetailResponse,
   type ApiProjectDetailResponse,
   type ParcelAnalysis,
@@ -656,18 +659,100 @@ function GIS({
   const [riskOnly, setRiskOnly] = useState(false)
   const [showLayerModal, setShowLayerModal] = useState(false)
 
+  // Phase 2.5.2 GIS Live API states
+  const [liveFeatures, setLiveFeatures] = useState<ApiGeoJSONFeature[]>([])
+  const [loading, setLoading] = useState<boolean>(true)
+  const [error, setError] = useState<string | null>(null)
+  const [isLiveMode, setIsLiveMode] = useState<boolean>(true)
+  const [bbox, setBbox] = useState<string>('85.10,25.55,85.15,25.65')
+
+  // Debounced live GIS spatial fetch from PostGIS API (triggered only by bbox and riskOnly)
+  useEffect(() => {
+    let isMounted = true
+    const timer = setTimeout(() => {
+      setLoading(true)
+      setError(null)
+
+      fetchGisParcels({
+        bbox,
+        risk_level: riskOnly ? 'High' : undefined,
+        limit: 100,
+      })
+        .then((geoJson) => {
+          if (isMounted) {
+            setLiveFeatures(geoJson.features)
+            setIsLiveMode(true)
+            setLoading(false)
+          }
+        })
+        .catch((err) => {
+          if (isMounted) {
+            setError(err instanceof Error ? err.message : 'Unable to connect to live PostGIS spatial API.')
+            setIsLiveMode(false)
+            setLoading(false)
+          }
+        })
+    }, 300)
+
+    return () => {
+      isMounted = false
+      clearTimeout(timer)
+    }
+  }, [bbox, riskOnly])
+
+  // Derive parcel objects strictly from Live PostGIS GeoJSON features or Demo Fallback
+  const liveParcels = useMemo(() => {
+    if (!isLiveMode || liveFeatures.length === 0) return []
+    return liveFeatures.map((feat) => {
+      const p = mapGisFeatureToParcel(feat)
+      // Extract coordinates from GeoJSON geometry if ui_x/ui_y missing
+      if (p.x === 50 && p.y === 50 && feat.geometry && feat.geometry.coordinates) {
+        try {
+          const coords = feat.geometry.coordinates[0]
+          if (Array.isArray(coords) && coords.length > 0) {
+            const lons = coords.map((c: number[]) => c[0])
+            const lats = coords.map((c: number[]) => c[1])
+            const avgLon = lons.reduce((a: number, b: number) => a + b, 0) / lons.length
+            const avgLat = lats.reduce((a: number, b: number) => a + b, 0) / lats.length
+            p.x = Math.max(10, Math.min(90, Math.round(((avgLon - 85.10) / 0.05) * 100)))
+            p.y = Math.max(10, Math.min(90, Math.round((1 - (avgLat - 25.55) / 0.10) * 100)))
+          }
+        } catch {
+          // Keep default fallback
+        }
+      }
+      return p
+    })
+  }, [isLiveMode, liveFeatures])
+
+  const shown = isLiveMode && liveParcels.length > 0
+    ? liveParcels.filter((p) => {
+        const cached = aiCache[p.id]
+        const score = cached ? cached.prediction.risk_score : p.risk
+        const matchesRisk = !riskOnly || score > 60
+        const matchesSearch = `${p.id} ${p.survey} ${p.owner}`.toLowerCase().includes(query.toLowerCase())
+        return matchesRisk && matchesSearch
+      })
+    : parcels.filter((p) => {
+        const cached = aiCache[p.id]
+        const score = cached ? cached.prediction.risk_score : p.risk
+        const matchesRisk = !riskOnly || score > 60
+        const matchesSearch = `${p.id} ${p.survey} ${p.owner}`.toLowerCase().includes(query.toLowerCase())
+        return matchesRisk && matchesSearch
+      })
+
   const currentAnalysis = aiCache[selected.id]
 
   const runGISAnalysis = async () => {
     try {
       await getOrFetchParcelAnalysis(selected, true)
     } catch {
-      // Error handled in getOrFetchParcelAnalysis
+      // Handled in helper
     }
   }
 
   const exportView = () => {
-    const summary = `BHOOMISETU GIS EXPORT REPORT\nDate: ${new Date().toLocaleDateString()}\nParcel: ${selected.id}\nDistrict: ${selected.district}\nArea: ${selected.area}\nLand Use: ${selected.landUse}\nRisk Score: ${currentAnalysis ? currentAnalysis.prediction.risk_score : selected.risk} / 100\nRisk Level: ${currentAnalysis ? currentAnalysis.prediction.risk_level : getRiskLabel(selected.risk)}\n`
+    const summary = `BHOOMISETU GIS EXPORT REPORT\nDate: ${new Date().toLocaleDateString()}\nData Source: ${isLiveMode ? 'PostgreSQL PostGIS Live Spatial Engine' : 'Demo Fallback Data'}\nViewport BBOX: ${bbox}\nParcel: ${selected.id}\nDistrict: ${selected.district}\nArea: ${selected.area}\nLand Use: ${selected.landUse}\nRisk Score: ${currentAnalysis ? currentAnalysis.prediction.risk_score : selected.risk} / 100\nRisk Level: ${currentAnalysis ? currentAnalysis.prediction.risk_level : getRiskLabel(selected.risk)}\n`
     const blob = new Blob([summary], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -678,17 +763,18 @@ function GIS({
     notify(`Export report generated for ${selected.id}`)
   }
 
-  const shown = parcels.filter((p) => {
-    const cached = aiCache[p.id]
-    const score = cached ? cached.prediction.risk_score : p.risk
-    const matchesRisk = !riskOnly || score > 60
-    const matchesSearch = `${p.id} ${p.survey} ${p.owner}`.toLowerCase().includes(query.toLowerCase())
-    return matchesRisk && matchesSearch
-  })
-
   return (
     <>
-      <Heading eyebrow="SPATIAL OPERATIONS · PATNA DISTRICT" title="GIS Command Center" subtitle="India / Bihar / Patna / NH-327 Ring Road" action={<Button className="primary-button" onClick={exportView}><Download size={14} /> Export view</Button>} />
+      <Heading
+        eyebrow={`SPATIAL OPERATIONS · ${isLiveMode ? 'POSTGIS LIVE API' : 'FALLBACK MODE'}`}
+        title="GIS Command Center"
+        subtitle={`India / Bihar / Patna / NH-327 Ring Road · BBOX: [${bbox}]`}
+        action={
+          <Button className="primary-button" onClick={exportView}>
+            <Download size={14} /> Export view
+          </Button>
+        }
+      />
 
       <div className="gis-toolbar">
         <div className="inline-search">
@@ -701,11 +787,32 @@ function GIS({
         <Button className="toggle" onClick={() => setShowLayerModal(!showLayerModal)}>
           <Layers size={15} /> Layers ({Object.values(gisLayers).filter(Boolean).length}/4)
         </Button>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto', fontSize: '11px' }}>
+          <span className="muted font-mono">Viewport BBOX:</span>
+          <select
+            value={bbox}
+            onChange={(e) => setBbox(e.target.value)}
+            style={{
+              fontSize: '11px',
+              padding: '4px 8px',
+              borderRadius: '4px',
+              border: '1px solid #c5d4cd',
+              background: '#ffffff',
+              color: '#294b55',
+              fontWeight: 600,
+            }}
+          >
+            <option value="85.10,25.55,85.15,25.65">Patna NH-327 BBOX (85.10,25.55)</option>
+            <option value="85.00,25.50,85.30,25.75">Extended District BBOX (85.00,25.50)</option>
+            <option value="84.50,25.00,86.00,26.50">Bihar Regional BBOX (84.50,25.00)</option>
+          </select>
+        </div>
       </div>
 
       {showLayerModal && (
         <div className="panel" style={{ padding: '14px 19px', marginBottom: '14px', background: '#f8faf9', border: '1px solid #dbe8e1' }}>
-          <strong style={{ fontSize: '11px', color: '#294b55', display: 'block', marginBottom: '8px' }}>Demo GIS Layer Controls</strong>
+          <strong style={{ fontSize: '11px', color: '#294b55', display: 'block', marginBottom: '8px' }}>GIS Spatial Layer Controls</strong>
           <div style={{ display: 'flex', gap: '20px', fontSize: '10px', color: '#557074' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
               <input type="checkbox" checked={gisLayers.landBoundary} onChange={(e) => setGisLayers((prev) => ({ ...prev, landBoundary: e.target.checked }))} /> Land Boundary Layer
@@ -723,15 +830,31 @@ function GIS({
         </div>
       )}
 
+      {loading && (
+        <div className="panel" style={{ padding: '10px 16px', marginBottom: '12px', background: '#f5faf7', border: '1px solid #cce5d8' }}>
+          <small className="muted font-mono">Querying PostGIS spatial database for BBOX [{bbox}]...</small>
+        </div>
+      )}
+
+      {!isLiveMode && error && (
+        <div className="panel" style={{ padding: '10px 16px', background: '#fdf3f2', border: '1px solid #f5c6cb', color: '#721c24', marginBottom: '12px' }}>
+          <small>
+            <strong>DEMO FALLBACK MODE:</strong> {error} Displaying static fallback parcels.
+          </small>
+        </div>
+      )}
+
       <section className="gis-layout">
         <div className="panel gis-hero">
           <div className="panel-head">
             <div>
               <h3>Live parcel spatial view</h3>
-              <p>{shown.length} parcels visible · Click a marker to select</p>
+              <p>
+                {shown.length} parcels visible · {isLiveMode ? 'Sourced from PostGIS GeoJSON' : 'Fallback demo mode'} · Click a marker to select
+              </p>
             </div>
-            <span className="live-label">
-              <i></i> MAP LIVE
+            <span className={`live-label ${isLiveMode ? '' : 'offline'}`} style={isLiveMode ? {} : { background: '#f5c6cb', color: '#721c24' }}>
+              <i></i> {isLiveMode ? 'POSTGIS LIVE' : 'DEMO FALLBACK'}
             </span>
           </div>
 
