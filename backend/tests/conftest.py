@@ -31,13 +31,34 @@ def is_db_available() -> bool:
 DB_AVAILABLE = is_db_available()
 
 
-def override_get_current_user() -> User:
-    """Dependency override providing seeded District Officer Anil Kumar for integration test suites."""
+from typing import Optional
+from fastapi import Depends
+from app.core.security import decode_access_token
+from app.api.deps import oauth2_scheme
+import uuid
+
+def override_get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> User:
+    """
+    Dependency override for integration test suites.
+    If a valid Bearer token is provided, decodes the user from the token.
+    Otherwise defaults to seeded District Officer Anil Kumar.
+    """
     db = SessionLocal()
     try:
+        if token:
+            payload = decode_access_token(token)
+            if payload and "sub" in payload:
+                try:
+                    user_id = uuid.UUID(payload["sub"])
+                    user = db.query(User).filter(User.id == user_id).first()
+                    if user:
+                        if user.role:
+                            setattr(user, "role_name", user.role.name)
+                        return user
+                except Exception:
+                    pass
         user = db.query(User).filter(User.email == "anil.kumar@bhoomisetu.gov.in").first()
         if not user:
-            # Fallback if DB not seeded yet
             user = db.query(User).first()
         if user and user.role:
             setattr(user, "role_name", user.role.name)
@@ -53,4 +74,5 @@ def setup_test_auth_overrides():
         app.dependency_overrides[get_current_user] = override_get_current_user
     yield
     app.dependency_overrides.pop(get_current_user, None)
+
 

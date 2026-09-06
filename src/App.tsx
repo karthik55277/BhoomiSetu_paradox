@@ -424,7 +424,29 @@ function App() {
             )}
           </div>
           <div className="top-actions">
+            <span
+              className="demo-env-badge"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '4px 10px',
+                borderRadius: '12px',
+                backgroundColor: 'rgba(234, 179, 8, 0.12)',
+                color: '#eab308',
+                border: '1px solid rgba(234, 179, 8, 0.3)',
+                fontSize: '11px',
+                fontWeight: 600,
+                letterSpacing: '0.5px',
+                textTransform: 'uppercase',
+              }}
+              title="BhoomiSetu Hackathon Demonstration Environment"
+            >
+              <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#eab308', display: 'inline-block' }} />
+              DEMO ENVIRONMENT
+            </span>
             <div className="demo-badge" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+
               <span style={{
                 width: '8px',
                 height: '8px',

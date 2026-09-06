@@ -1,6 +1,7 @@
-# BhoomiSetu Platform — Production & Container Deployment Guide
+# BhoomiSetu Platform — 0.3.0 Release Candidate (Hackathon / Single-Instance Deployment Guide)
 
-This guide documents single-command containerized deployment of the BhoomiSetu platform using **Docker** & **Docker Compose**.
+This guide documents single-command containerized deployment of the BhoomiSetu platform using **Docker** & **Docker Compose** for hackathon, demonstration, and single-instance environments.
+
 
 ---
 

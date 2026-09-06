@@ -1,3 +1,4 @@
+import os
 from typing import Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -20,12 +21,20 @@ demo_router = APIRouter(prefix="/demo", tags=["demo"])
 @demo_router.post("/reset")
 def reset_demo_environment(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["system_admin", "district_officer"])),
+    current_user: User = Depends(require_role(["system_admin"])),
 ) -> Dict[str, Any]:
     """
     Deterministic Hackathon Demo Reset Endpoint.
     Restores demo environment to clean baseline seed state for predictable hackathon presentations.
+    Requires system_admin role and DEMO_MODE environment setting to be enabled.
     """
+    demo_mode_env = os.getenv("DEMO_MODE", "true").lower()
+    if demo_mode_env not in ("true", "1", "yes"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Demo reset endpoint is disabled because DEMO_MODE is set to false.",
+        )
+
     try:
         # 1. Clean up demo-created field inspections
         db.query(FieldInspection).delete(synchronize_session=False)
@@ -78,3 +87,4 @@ def reset_demo_environment(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to reset demo environment: {str(exc)}",
         ) from exc
+

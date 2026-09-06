@@ -1,8 +1,10 @@
 # BhoomiSetu (भूमिसेतु) 🌾 - National Land Intelligence Platform
 
-> **Smart India Hackathon (SIH)** | Developed by **Team The Mavericks**
+> **BhoomiSetu 0.3.0 Release Candidate — Hackathon / Single-Instance Deployment**  
+> Developed by **Team The Mavericks** | Smart India Hackathon (SIH)
 
-**BhoomiSetu** is an AI-powered National Land Intelligence Platform designed to streamline land acquisition for large-scale infrastructure projects. It combines **Machine Learning risk scoring**, **SHAP explainable AI**, **interactive GIS spatial layers**, and **acquisition workflow tracking** to mitigate delays, prevent disputes, and optimize compensation distribution.
+**BhoomiSetu** is an AI-powered National Land Intelligence Platform designed to streamline land acquisition for large-scale infrastructure projects. It combines **Machine Learning risk scoring**, **SHAP explainable AI**, **interactive PostGIS spatial layers**, **offline field survey synchronization**, and **tamper-evident SHA-256 audit tracking** to mitigate delays, prevent disputes, and optimize compensation distribution.
+
 
 ---
 
