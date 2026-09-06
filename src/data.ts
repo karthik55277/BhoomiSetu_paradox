@@ -48,13 +48,16 @@ export type CompensationRecord = {
 
 export type DocumentRecord = {
   id: string
+  dbId?: string
   title: string
   parcelId: string
   projectId: string
-  category: 'Land Title' | 'Acquisition Notice' | 'Valuation Report' | 'Objection Filing' | 'Survey Map'
-  status: 'Verified' | 'Pending' | 'Flagged'
+  category: string
+  status: string
   fileSize: string
   uploadedAt: string
+  storagePath?: string
+  mimeType?: string
 }
 
 export type AuditEvent = {

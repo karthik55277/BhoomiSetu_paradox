@@ -144,12 +144,13 @@ def test_compensation_update():
 
 @skip_if_no_db
 def test_document_creation():
-    """Test POST /api/v1/documents metadata creation."""
+    """Test POST /api/v1/documents metadata creation and single audit event generation."""
     proj_res = client.get("/api/v1/projects/NH-327")
     proj_id = proj_res.json()["id"]
 
+    doc_code = f"DOC-TEST-{os.urandom(2).hex()}"
     doc_payload = {
-        "document_code": f"DOC-TEST-{os.urandom(2).hex()}",
+        "document_code": doc_code,
         "title": "Test Integration Document",
         "project_id": proj_id,
         "category": "Valuation Report",
@@ -161,6 +162,30 @@ def test_document_creation():
     response = client.post("/api/v1/documents", json=doc_payload)
     assert response.status_code == 201
     assert response.json()["title"] == "Test Integration Document"
+
+    # Verify database persistence & single audit event generation
+    from app.db.session import SessionLocal
+    db = SessionLocal()
+    try:
+        from app.models.documents import DocumentRecord
+        from app.models.audit import AuditEvent
+        from app.services.audit_service import verify_chain_health
+
+        doc_count = db.query(DocumentRecord).filter(DocumentRecord.document_code == doc_code).count()
+        assert doc_count == 1
+
+        audit_events = db.query(AuditEvent).filter(
+            AuditEvent.entity_table == "documents",
+            AuditEvent.action_type == "DOCUMENT_CREATE",
+        ).all()
+        matching_audits = [a for a in audit_events if a.payload and a.payload.get("document_code") == doc_code]
+        assert len(matching_audits) == 1
+
+        health = verify_chain_health(db)
+        assert health["chain_valid"] is True
+    finally:
+        db.close()
+
 
 
 @skip_if_no_db

@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { Activity, AlertTriangle, ArrowLeft, ArrowRight, Bell, Check, CheckCircle2, ChevronDown, CircleHelp, Download, FileText, Layers, Landmark, LayoutDashboard, Map, Menu, RefreshCw, Search, Settings, ShieldCheck, Sparkles, Upload } from 'lucide-react'
 import {
   buildParcelRiskInput,
+  createDocumentMetadata,
   explainRisk,
   fetchCompensations,
   fetchDisputes,
+  fetchDocuments,
   fetchGisParcels,
   fetchParcelAiHistory,
   fetchParcelDetail,
@@ -15,6 +17,7 @@ import {
   getNextCompensationStatus,
   mapApiCompensationToUi,
   mapApiDisputeToUi,
+  mapApiDocumentToUi,
   mapGisFeatureToParcel,
   updateCompensation,
   updateDispute,
@@ -65,6 +68,7 @@ function Button({
   disabled = false,
   title,
   style,
+  type = 'button',
 }: {
   children: React.ReactNode
   onClick?: () => void
@@ -72,9 +76,10 @@ function Button({
   disabled?: boolean
   title?: string
   style?: React.CSSProperties
+  type?: 'button' | 'submit' | 'reset'
 }) {
   return (
-    <button className={className} onClick={onClick} disabled={disabled} title={title} style={style}>
+    <button type={type} className={className} onClick={onClick} disabled={disabled} title={title} style={style}>
       {children}
     </button>
   )
@@ -124,6 +129,10 @@ function App() {
 
     fetchCompensations()
       .then((res) => setCompensations(res.items.map(mapApiCompensationToUi)))
+      .catch(() => {})
+
+    fetchDocuments()
+      .then((res) => setDocuments(res.items.map(mapApiDocumentToUi)))
       .catch(() => {})
   }, [])
 
@@ -365,7 +374,6 @@ function App() {
             disputes={disputes}
             compensations={compensations}
             documents={documents}
-            setDocuments={setDocuments}
             auditEvents={auditEvents}
             gisLayers={gisLayers}
             setGisLayers={setGisLayers}
@@ -396,7 +404,6 @@ function Page({
   disputes,
   compensations,
   documents,
-  setDocuments,
   auditEvents,
   gisLayers,
   setGisLayers,
@@ -415,7 +422,6 @@ function Page({
   disputes: DisputeRecord[]
   compensations: CompensationRecord[]
   documents: DocumentRecord[]
-  setDocuments: React.Dispatch<React.SetStateAction<DocumentRecord[]>>
   auditEvents: AuditEvent[]
   gisLayers: { landBoundary: boolean; riverBuffer: boolean; roadCorridor: boolean; highRiskOverlay: boolean }
   setGisLayers: React.Dispatch<React.SetStateAction<{ landBoundary: boolean; riverBuffer: boolean; roadCorridor: boolean; highRiskOverlay: boolean }>>
@@ -455,7 +461,7 @@ function Page({
   }
   if (route === '/disputes') return <DisputesView notify={notify} navigate={navigate} />
   if (route === '/compensation') return <CompensationView notify={notify} />
-  if (route === '/documents') return <DocumentsView documents={documents} setDocuments={setDocuments} notify={notify} />
+  if (route === '/documents') return <DocumentsView notify={notify} />
   if (route === '/audit') return <AuditView auditEvents={auditEvents} />
   if (route === '/analytics') return <AnalyticsView aiCache={aiCache} disputes={disputes} compensations={compensations} />
   if (route === '/settings') return <SettingsView notify={notify} />
@@ -2395,47 +2401,187 @@ function CompensationView({ notify }: { notify: (s: string) => void }) {
   )
 }
 
-function DocumentsView({
-  documents,
-  setDocuments,
-  notify,
-}: {
-  documents: DocumentRecord[]
-  setDocuments: React.Dispatch<React.SetStateAction<DocumentRecord[]>>
-  notify: (s: string) => void
-}) {
+function DocumentsView({ notify }: { notify: (s: string) => void }) {
   const [query, setQuery] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('All')
+  const [documents, setDocuments] = useState<DocumentRecord[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [registering, setRegistering] = useState(false)
+  const [showModal, setShowModal] = useState(false)
 
-  const filtered = documents.filter((doc) => {
-    const matchesSearch = `${doc.id} ${doc.title} ${doc.parcelId}`.toLowerCase().includes(query.toLowerCase())
-    const matchesCategory = categoryFilter === 'All' || doc.category === categoryFilter
-    return matchesSearch && matchesCategory
-  })
+  // Registration Modal state
+  const [regTitle, setRegTitle] = useState('')
+  const [regCategory, setRegCategory] = useState('Survey Map')
+  const [regParcelId, setRegParcelId] = useState('BR-042-0187')
+  const [regSizeMb, setRegSizeMb] = useState('2.4')
 
-  const mockUpload = () => {
-    const newDoc: DocumentRecord = {
-      id: `DOC-${Date.now().toString().slice(-3)}`,
-      title: `Verification record · Parcel BR-042-0193`,
-      parcelId: 'BR-042-0193',
-      projectId: 'NH-327',
-      category: 'Survey Map',
-      status: 'Verified',
-      fileSize: '3.6 MB',
-      uploadedAt: 'Today',
+  const loadDocuments = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetchDocuments({
+        search: query.trim() || undefined,
+        category: categoryFilter !== 'All' ? categoryFilter : undefined,
+      })
+      setDocuments(res.items.map(mapApiDocumentToUi))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch documents')
+    } finally {
+      setLoading(false)
     }
-    setDocuments((prev) => [newDoc, ...prev])
-    notify('Demo document uploaded to current session')
+  }
+
+  useEffect(() => {
+    loadDocuments()
+  }, [query, categoryFilter])
+
+  const handleRegisterDocument = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!regTitle.trim()) {
+      notify('Please enter a document title')
+      return
+    }
+
+    setRegistering(true)
+    try {
+      const projectDetail = await fetchProjectByCode('NH-327')
+
+      let parcelUuid: string | undefined = undefined
+      try {
+        const parcelDetail = await fetchParcelDetail(regParcelId)
+        parcelUuid = parcelDetail.raw.id
+      } catch {
+        // Fallback if parcel detail resolution fails
+      }
+
+      const docCode = `DOC-${Date.now().toString().slice(-4)}`
+      const payload = {
+        document_code: docCode,
+        title: regTitle.trim(),
+        project_id: projectDetail.raw.id,
+        parcel_id: parcelUuid,
+        category: regCategory,
+        storage_path: `/storage/docs/${docCode.toLowerCase()}.pdf`,
+        file_size_bytes: Math.max(1024, Math.round((parseFloat(regSizeMb) || 1.0) * 1048576)),
+        mime_type: 'application/pdf',
+        verification_status: 'Verified',
+      }
+
+      const created = await createDocumentMetadata(payload)
+      const mapped = mapApiDocumentToUi(created)
+
+      setDocuments((prev) => [mapped, ...prev])
+      notify(`Registered document metadata '${mapped.id}' in PostgreSQL · SHA-256 Audit Logged`)
+      setShowModal(false)
+      setRegTitle('')
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Registration failed'
+      notify(`Document registration failed: ${msg}`)
+    } finally {
+      setRegistering(false)
+    }
   }
 
   return (
     <>
-      <Heading title="Document Repository" subtitle="Verified titles, survey maps, and valuation files." action={<Button className="primary-button" onClick={mockUpload}><Upload size={14} /> Upload Demo Document</Button>} />
+      <div className="demo-badge live" style={{ marginBottom: '12px' }}>
+        <span className="live-dot"></span> POSTGRES LIVE API
+      </div>
+      <Heading
+        title="Document Repository"
+        subtitle="Verified titles, survey maps, and valuation metadata records stored in PostgreSQL."
+        action={
+          <Button className="primary-button" onClick={() => setShowModal(true)}>
+            <Upload size={14} /> Register Document Metadata
+          </Button>
+        }
+      />
+
+      {showModal && (
+        <div className="modal-backdrop" onClick={() => setShowModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px', padding: '24px' }}>
+            <h3>Register Document Metadata</h3>
+            <p style={{ fontSize: '11px', color: '#8a9998', marginBottom: '16px' }}>
+              Persist document metadata into PostgreSQL <code>document_records</code> table.
+              Generates cryptographic SHA-256 audit event on commit (physical binary storage out of scope).
+            </p>
+            <form onSubmit={handleRegisterDocument} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Document Title</label>
+                <input
+                  type="text"
+                  value={regTitle}
+                  onChange={(e) => setRegTitle(e.target.value)}
+                  placeholder="e.g. Survey Map · Parcel BR-042-0187"
+                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #c4d0ce' }}
+                  required
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Category</label>
+                  <select
+                    value={regCategory}
+                    onChange={(e) => setRegCategory(e.target.value)}
+                    style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #c4d0ce' }}
+                  >
+                    <option>Land Title</option>
+                    <option>Acquisition Notice</option>
+                    <option>Valuation Report</option>
+                    <option>Objection Filing</option>
+                    <option>Survey Map</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Associated Parcel</label>
+                  <select
+                    value={regParcelId}
+                    onChange={(e) => setRegParcelId(e.target.value)}
+                    style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #c4d0ce' }}
+                  >
+                    <option>BR-042-0187</option>
+                    <option>BR-042-0188</option>
+                    <option>BR-042-0191</option>
+                    <option>BR-042-0193</option>
+                    <option>BR-042-0195</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Estimated File Size (MB)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={regSizeMb}
+                  onChange={(e) => setRegSizeMb(e.target.value)}
+                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #c4d0ce' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
+                <Button type="button" className="outline-button" onClick={() => setShowModal(false)} disabled={registering}>
+                  Cancel
+                </Button>
+                <Button type="submit" className="primary-button" disabled={registering}>
+                  {registering ? 'Registering...' : 'Confirm Registration'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       <div className="table-tools">
         <div className="inline-search">
           <Search size={15} />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search document title or parcel ID..." />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search document title or parcel ID..."
+          />
         </div>
         <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
           <option>All</option>
@@ -2445,37 +2591,66 @@ function DocumentsView({
           <option>Objection Filing</option>
           <option>Survey Map</option>
         </select>
+        <Button className="outline-button" onClick={loadDocuments} title="Refresh">
+          <RefreshCw size={14} className={loading ? 'spinning' : ''} />
+        </Button>
       </div>
 
       <div className="panel table-panel">
-        <table>
-          <thead>
-            <tr>
-              <th>Document Title</th>
-              <th>Parcel ID</th>
-              <th>Category</th>
-              <th>File Size</th>
-              <th>Verification Status</th>
-              <th>Date Uploaded</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((doc) => (
-              <tr key={doc.id}>
-                <td>
-                  <strong>{doc.title}</strong>
-                </td>
-                <td>{doc.parcelId}</td>
-                <td>{doc.category}</td>
-                <td>{doc.fileSize}</td>
-                <td>
-                  <span className={`risk-pill ${doc.status === 'Verified' ? 'low' : 'high'}`}>{doc.status}</span>
-                </td>
-                <td>{doc.uploadedAt}</td>
+        {loading ? (
+          <div className="empty-state">
+            <RefreshCw size={20} className="spinning" />
+            <strong>Loading document metadata from PostgreSQL...</strong>
+          </div>
+        ) : error ? (
+          <div className="empty-state error">
+            <AlertTriangle size={20} />
+            <strong>Failed to load documents</strong>
+            <span>{error}</span>
+            <Button className="outline-button" onClick={loadDocuments}>
+              Retry
+            </Button>
+          </div>
+        ) : documents.length === 0 ? (
+          <div className="empty-state">
+            <AlertTriangle size={20} />
+            <strong>No documents found matching filter</strong>
+          </div>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Document Title</th>
+                <th>Parcel ID</th>
+                <th>Category</th>
+                <th>File Size</th>
+                <th>Verification Status</th>
+                <th>Date Uploaded</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {documents.map((doc) => (
+                <tr key={doc.id}>
+                  <td>
+                    <strong>{doc.title}</strong>
+                    {doc.storagePath && (
+                      <small style={{ display: 'block', fontSize: '10px', color: '#8a9998', marginTop: '2px' }}>
+                        Path: <code>{doc.storagePath}</code>
+                      </small>
+                    )}
+                  </td>
+                  <td>{doc.parcelId}</td>
+                  <td>{doc.category}</td>
+                  <td>{doc.fileSize}</td>
+                  <td>
+                    <span className={`risk-pill ${doc.status === 'Verified' ? 'low' : 'high'}`}>{doc.status}</span>
+                  </td>
+                  <td>{doc.uploadedAt}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </>
   )

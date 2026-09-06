@@ -12,7 +12,10 @@ from app.models.parcels import Parcel
 from app.models.projects import Project
 from app.schemas_v1 import DocumentCreate, DocumentResponse, PaginatedResponse
 
+from app.services.audit_service import create_audit_event
+
 router = APIRouter(prefix="/documents", tags=["documents"])
+
 
 
 @router.get("", response_model=PaginatedResponse[DocumentResponse])
@@ -116,6 +119,27 @@ def create_document_metadata(
         verification_status=payload.verification_status,
     )
     db.add(doc)
+    db.flush()
+
+    create_audit_event(
+        db=db,
+        title=f"Document record {doc.document_code} registered",
+        entity_table="documents",
+        action_type="DOCUMENT_CREATE",
+        payload={
+            "document_code": doc.document_code,
+            "title": doc.title,
+            "category": doc.category,
+            "verification_status": doc.verification_status,
+            "file_size_bytes": doc.file_size_bytes,
+            "storage_path": doc.storage_path,
+        },
+        actor_name="Document Registrar",
+        entity_id=doc.id,
+        parcel_id=doc.parcel_id,
+        project_id=doc.project_id,
+    )
+
     db.commit()
     db.refresh(doc)
 
