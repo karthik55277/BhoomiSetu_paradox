@@ -1,8 +1,10 @@
 import type { Parcel } from './data'
+import { requestJson } from './api/client'
 
-export const API_BASE_URL = 'http://127.0.0.1:8000'
+export * from './api/index'
 
 export type LandRiskInput = {
+  parcel_id?: string
   state: string
   district: string
   land_type: string
@@ -35,6 +37,10 @@ export type RiskPredictionResponse = {
   risk_score: number
   risk_level: string
   acquisition_risk: number
+  analysis_id?: string | null
+  model_version?: string | null
+  persisted_at?: string | null
+  is_persisted?: boolean
 }
 
 export type RiskExplanationResponse = RiskPredictionResponse & {
@@ -53,7 +59,6 @@ export type ParcelAnalysis = {
 }
 
 export type ParcelAnalysisCache = Record<string, ParcelAnalysis>
-
 
 export function formatFeatureName(feature: string): string {
   const labels: Record<string, string> = {
@@ -122,6 +127,7 @@ export function buildParcelRiskInput(parcel: Parcel): LandRiskInput {
   const estimatedCompensation = landValue * (baseRisk > 70 ? 0.96 : baseRisk > 40 ? 0.88 : 0.8)
 
   return {
+    parcel_id: parcel.id,
     state: 'Bihar',
     district: parcel.district,
     land_type: parcel.landType,
@@ -144,33 +150,17 @@ export function buildParcelRiskInput(parcel: Parcel): LandRiskInput {
   }
 }
 
-async function requestJson<T>(path: string, body?: Record<string, unknown>): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method: body ? 'POST' : 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  })
-
-  if (!response.ok) {
-    let message = 'Request failed'
-    try {
-      const errorBody = await response.json() as { detail?: string }
-      message = errorBody?.detail ?? message
-    } catch {
-      message = response.statusText || message
-    }
-    throw new Error(message)
-  }
-
-  return response.json() as Promise<T>
-}
-
 export async function predictRisk(payload: LandRiskInput): Promise<RiskPredictionResponse> {
-  return requestJson<RiskPredictionResponse>('/api/v1/ai/risk/predict', payload)
+  return requestJson<RiskPredictionResponse>('/api/v1/ai/risk/predict', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 }
 
 export async function explainRisk(payload: LandRiskInput, limit = 5): Promise<RiskExplanationResponse> {
-  return requestJson<RiskExplanationResponse>(`/api/v1/ai/risk/explain?limit=${limit}`, payload)
+  return requestJson<RiskExplanationResponse>(`/api/v1/ai/risk/explain?limit=${limit}`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 }
+

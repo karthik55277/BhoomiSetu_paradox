@@ -47,7 +47,9 @@ FEATURES = [
     "historical_acquisition_duration",
 ]
 
+MODEL_VERSION = "acquisition-risk-0.1.0"
 LABELS = {0: "LOW", 1: "MEDIUM", 2: "HIGH", 3: "CRITICAL"}
+
 
 
 @lru_cache(maxsize=1)

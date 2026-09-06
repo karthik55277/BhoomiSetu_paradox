@@ -12,6 +12,7 @@ class LandRiskInput(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    parcel_id: str | None = None
     state: str
     district: str
     land_type: str
@@ -44,6 +45,11 @@ class RiskPredictionResponse(BaseModel):
     risk_score: float
     risk_level: str
     acquisition_risk: int
+    analysis_id: str | None = None
+    model_version: str | None = None
+    persisted_at: str | None = None
+    is_persisted: bool = False
+
 
 
 class RiskExplanationResponse(RiskPredictionResponse):

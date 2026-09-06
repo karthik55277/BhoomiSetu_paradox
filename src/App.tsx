@@ -1,8 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Activity, AlertTriangle, ArrowLeft, ArrowRight, Bell, Check, CheckCircle2, ChevronDown, CircleHelp, Download, FileText, Layers, Landmark, LayoutDashboard, Map, Menu, RefreshCw, Search, Settings, ShieldCheck, Sparkles, Upload } from 'lucide-react'
-import { buildParcelRiskInput, explainRisk, formatFeatureName, predictRisk, type ParcelAnalysis, type ParcelAnalysisCache } from './api'
+import {
+  buildParcelRiskInput,
+  explainRisk,
+  fetchParcelDetail,
+  fetchParcels,
+  fetchProjectByCode,
+  fetchProjects,
+  formatFeatureName,
+  predictRisk,
+  type ApiParcelDetailResponse,
+  type ApiProjectDetailResponse,
+  type ParcelAnalysis,
+  type ParcelAnalysisCache,
+} from './api'
 import { getRiskLabel, initialAuditEvents, initialCompensations, initialDisputes, initialDocuments, parcels, projects, stages, type AuditEvent, type CompensationRecord, type DisputeRecord, type DocumentRecord, type Parcel } from './data'
 import './App.css'
+
 
 type Icon = typeof LayoutDashboard
 const navItems: [string, string, Icon][] = [
@@ -824,28 +838,51 @@ function GIS({
 
 function ParcelList({ openParcel, aiCache }: { openParcel: (p: Parcel) => void; aiCache: ParcelAnalysisCache }) {
   const [query, setQuery] = useState('')
-  const [status, setStatus] = useState('All statuses')
+  const [statusFilter, setStatusFilter] = useState('All statuses')
   const [riskFilter, setRiskFilter] = useState('All risk levels')
+  const [liveParcels, setLiveParcels] = useState<Parcel[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  const shown = parcels.filter((p) => {
-    const cached = aiCache[p.id]
-    const riskLevel = cached ? cached.prediction.risk_level : getRiskLabel(p.risk)
-    const matchesSearch = `${p.id} ${p.survey} ${p.owner} ${p.district}`.toLowerCase().includes(query.toLowerCase())
-    const matchesStatus = status === 'All statuses' || p.status === status
-    const matchesRisk = riskFilter === 'All risk levels' || riskLevel === riskFilter
+  useEffect(() => {
+    let isMounted = true
+    setLoading(true)
+    setError(null)
 
-    return matchesSearch && matchesStatus && matchesRisk
-  })
+    fetchParcels({
+      search: query.trim() || undefined,
+      acquisition_status: statusFilter !== 'All statuses' ? statusFilter : undefined,
+      risk_level: riskFilter !== 'All risk levels' ? riskFilter : undefined,
+    })
+      .then(({ ui }) => {
+        if (isMounted) {
+          setLiveParcels(ui)
+          setLoading(false)
+        }
+      })
+      .catch((err) => {
+        if (isMounted) {
+          setError(err instanceof Error ? err.message : 'Unable to load live parcels.')
+          setLoading(false)
+        }
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [query, statusFilter, riskFilter])
+
+  const shown = liveParcels.length > 0 || loading || error ? liveParcels : parcels
 
   return (
     <>
-      <Heading title="Land Parcels" subtitle="Search, filter, and inspect parcels across active acquisition scope." action={<Button className="primary-button" onClick={() => openParcel(parcels[0])}>Inspect Selected Parcel</Button>} />
+      <Heading title="Land Parcels" subtitle="Search, filter, and inspect parcels across active acquisition scope." action={<Button className="primary-button" onClick={() => openParcel(shown[0] || parcels[0])}>Inspect Selected Parcel</Button>} />
       <div className="table-tools">
         <div className="inline-search">
           <Search size={15} />
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search parcel ID, survey number, or owner..." />
         </div>
-        <select value={status} onChange={(e) => setStatus(e.target.value)}>
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
           <option>All statuses</option>
           {['Under review', 'Notice issued', 'Survey', 'Identified', 'Objection'].map((s) => (
             <option key={s}>{s}</option>
@@ -859,53 +896,65 @@ function ParcelList({ openParcel, aiCache }: { openParcel: (p: Parcel) => void; 
         </select>
       </div>
 
-      <div className="panel table-panel">
-        <table>
-          <thead>
-            <tr>
-              <th>Parcel ID & Survey</th>
-              <th>District</th>
-              <th>Area</th>
-              <th>Risk Score</th>
-              <th>Acquisition Status</th>
-              <th>Primary Owner</th>
-              <th>AI Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {shown.map((p) => {
-              const cached = aiCache[p.id]
-              const score = cached ? Math.round(cached.prediction.risk_score) : p.risk
-              const label = cached ? cached.prediction.risk_level : getRiskLabel(p.risk)
+      {error && (
+        <div className="panel" style={{ padding: '14px 20px', background: '#fdf3f2', border: '1px solid #f5c6cb', color: '#721c24', marginBottom: '14px' }}>
+          <strong>API Connection Notice:</strong> {error} Showing offline parcel cache.
+        </div>
+      )}
 
-              return (
-                <tr key={p.id} onClick={() => openParcel(p)}>
-                  <td>
-                    <strong>{p.id}</strong>
-                    <small>{p.survey}</small>
-                  </td>
-                  <td>Patna</td>
-                  <td>{p.area}</td>
-                  <td>
-                    <span className={`risk-pill ${score > 60 ? 'high' : score > 30 ? 'medium' : 'low'}`}>
-                      {score} {label}
-                    </span>
-                  </td>
-                  <td>{p.status}</td>
-                  <td>{p.owner}</td>
-                  <td>
-                    <span style={{ fontSize: '9px', color: cached ? '#4c997b' : '#889896', fontWeight: 600 }}>{cached ? '✓ Analyzed' : 'Seeded Demo'}</span>
-                  </td>
-                  <td>
-                    <ArrowRight size={15} />
-                  </td>
-                </tr>
-              )}
-            )}
-          </tbody>
-        </table>
-        {shown.length === 0 && (
+      <div className="panel table-panel">
+        {loading ? (
+          <div style={{ padding: '24px', textAlign: 'center', color: '#557074' }}>
+            <span>Loading parcels from live database...</span>
+          </div>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Parcel ID & Survey</th>
+                <th>District</th>
+                <th>Area</th>
+                <th>Risk Score</th>
+                <th>Acquisition Status</th>
+                <th>Primary Owner</th>
+                <th>AI Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((p) => {
+                const cached = aiCache[p.id]
+                const score = cached ? Math.round(cached.prediction.risk_score) : p.risk
+                const label = cached ? cached.prediction.risk_level : getRiskLabel(p.risk)
+
+                return (
+                  <tr key={p.id} onClick={() => openParcel(p)}>
+                    <td>
+                      <strong>{p.id}</strong>
+                      <small>{p.survey}</small>
+                    </td>
+                    <td>{p.district || 'Patna'}</td>
+                    <td>{p.area}</td>
+                    <td>
+                      <span className={`risk-pill ${score > 60 ? 'high' : score > 30 ? 'medium' : 'low'}`}>
+                        {score} {label}
+                      </span>
+                    </td>
+                    <td>{p.status}</td>
+                    <td>{p.owner}</td>
+                    <td>
+                      <span style={{ fontSize: '9px', color: cached ? '#4c997b' : '#889896', fontWeight: 600 }}>{cached ? '✓ Analyzed' : 'Live DB'}</span>
+                    </td>
+                    <td>
+                      <ArrowRight size={15} />
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        )}
+        {!loading && shown.length === 0 && (
           <div className="empty-state">
             <Search size={22} />
             <strong>No parcels matched your query</strong>
@@ -930,7 +979,36 @@ function ParcelProfile({
   getOrFetchParcelAnalysis: (p: Parcel, force?: boolean) => Promise<ParcelAnalysis>
   isAnalyzing: boolean
 }) {
-  const currentAnalysis = aiCache[parcel.id]
+  const [liveDetail, setLiveDetail] = useState<ApiParcelDetailResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let isMounted = true
+    setLoading(true)
+    setError(null)
+
+    fetchParcelDetail(parcel.id)
+      .then(({ raw }) => {
+        if (isMounted) {
+          setLiveDetail(raw)
+          setLoading(false)
+        }
+      })
+      .catch((err) => {
+        if (isMounted) {
+          setError(err instanceof Error ? err.message : 'Unable to load live parcel profile.')
+          setLoading(false)
+        }
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [parcel.id])
+
+  const sessionAnalysis = aiCache[parcel.id]
+  const dbAiResult = liveDetail?.current_ai_result
 
   const runProfileAnalysis = async () => {
     try {
@@ -940,21 +1018,49 @@ function ParcelProfile({
     }
   }
 
-  const activeRiskScore = currentAnalysis ? Math.round(currentAnalysis.prediction.risk_score) : parcel.risk
-  const activeRiskLevel = currentAnalysis ? currentAnalysis.prediction.risk_level : getRiskLabel(parcel.risk)
+  const activeRiskScore = sessionAnalysis
+    ? Math.round(sessionAnalysis.prediction.risk_score)
+    : dbAiResult
+    ? Math.round(dbAiResult.risk_score)
+    : parcel.risk
+
+  const activeRiskLevel = sessionAnalysis
+    ? sessionAnalysis.prediction.risk_level
+    : dbAiResult
+    ? dbAiResult.risk_level
+    : getRiskLabel(parcel.risk)
+
+  const activeContributors = sessionAnalysis
+    ? sessionAnalysis.explanation.contributors
+    : dbAiResult
+    ? dbAiResult.top_positive_contributors
+    : []
 
   return (
     <>
       <Button className="back-button" onClick={() => navigate('/parcels')}>
         <ArrowLeft size={15} /> Back to parcels list
       </Button>
+
+      {loading && (
+        <div className="panel" style={{ padding: '10px 16px', marginBottom: '12px' }}>
+          <small className="muted font-mono">Loading live parcel profile from PostgreSQL...</small>
+        </div>
+      )}
+
+      {error && (
+        <div className="panel" style={{ padding: '10px 16px', background: '#fdf3f2', border: '1px solid #f5c6cb', color: '#721c24', marginBottom: '12px' }}>
+          <small>API Notice: {error} Displaying session parcel view.</small>
+        </div>
+      )}
+
       <Heading
         eyebrow="PARCEL INTELLIGENCE PROFILE"
         title={parcel.id}
         subtitle={`${parcel.district} district · ${parcel.survey} · ${parcel.area} · ${parcel.project}`}
         action={
           <Button className="primary-button" onClick={runProfileAnalysis} disabled={isAnalyzing}>
-            {isAnalyzing ? 'Analyzing ML Model...' : currentAnalysis ? 'Re-analyze Parcel' : 'Run Full Analysis'} <Sparkles size={14} />
+            {isAnalyzing ? 'Analyzing ML Model...' : sessionAnalysis || dbAiResult ? 'Re-analyze Parcel' : 'Run Full Analysis'} <Sparkles size={14} />
           </Button>
         }
       />
@@ -984,7 +1090,7 @@ function ParcelProfile({
           <div className="panel-head">
             <div>
               <h3>AI Decision Support</h3>
-              <p>{currentAnalysis ? `ML Model Output (${currentAnalysis.explanation.explanation_method})` : 'Seeded Initial Parameters'}</p>
+              <p>{sessionAnalysis ? `ML Model Output (${sessionAnalysis.explanation.explanation_method})` : dbAiResult ? `Persisted AI Analysis (${dbAiResult.model_version})` : 'Seeded Initial Parameters'}</p>
             </div>
             <Sparkles size={18} className="ai-icon" />
           </div>
@@ -1012,9 +1118,9 @@ function ParcelProfile({
           </div>
 
           <div className="reason-list">
-            <strong>{currentAnalysis ? 'Top ML SHAP Risk Contributors' : 'Initial Risk Indicators'}</strong>
-            {currentAnalysis && currentAnalysis.explanation.contributors.length > 0 ? (
-              currentAnalysis.explanation.contributors.slice(0, 4).map((c, i) => (
+            <strong>{sessionAnalysis || dbAiResult ? 'Top ML SHAP Risk Contributors' : 'Initial Risk Indicators'}</strong>
+            {activeContributors.length > 0 ? (
+              activeContributors.slice(0, 4).map((c, i) => (
                 <span key={i}>
                   {formatFeatureName(c.feature)} <b className={c.impact >= 0 ? '' : 'negative'}>{c.impact >= 0 ? '+' : '-'}{Math.abs(c.impact).toFixed(2)}</b>
                 </span>
@@ -1029,9 +1135,9 @@ function ParcelProfile({
             )}
           </div>
 
-          {currentAnalysis && (
+          {(sessionAnalysis || dbAiResult) && (
             <div style={{ padding: '0 19px 15px', fontSize: '9px', color: '#7a8e8c' }}>
-              <em>{currentAnalysis.explanation.decision_support_notice}</em>
+              <em>AI supports review and does not autonomously approve or reject acquisition decisions.</em>
             </div>
           )}
         </div>
@@ -1059,6 +1165,7 @@ function ParcelProfile({
     </>
   )
 }
+
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
@@ -1225,35 +1332,87 @@ function AI({
 }
 
 function Projects({ notify, navigate }: { notify: (s: string) => void; navigate: (s: string) => void }) {
+  const [liveProjects, setLiveProjects] = useState<(typeof projects)[0][]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let isMounted = true
+    setLoading(true)
+    setError(null)
+
+    fetchProjects()
+      .then(({ ui }) => {
+        if (isMounted) {
+          setLiveProjects(ui)
+          setLoading(false)
+        }
+      })
+      .catch((err) => {
+        if (isMounted) {
+          setError(err instanceof Error ? err.message : 'Unable to load projects from live API.')
+          setLoading(false)
+        }
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  const displayProjects = liveProjects.length > 0 || loading || error ? liveProjects : projects
+
   return (
     <>
       <Heading title="Acquisition Projects" subtitle="Active land acquisition programs across district zones." action={<Button className="primary-button" onClick={() => notify('Project creation form: Contact system administrator')}>+ New Project</Button>} />
-      <div className="project-grid">
-        {projects.map((p) => (
-          <Button key={p.id} className="project-card" onClick={() => navigate(`/projects/${p.id}`)}>
-            <div>
-              <span className="project-code">{p.id}</span>
-              <span className="status-label">{p.status}</span>
-            </div>
-            <h3>{p.name}</h3>
-            <p>
-              {p.type} · {p.district} district
-            </p>
-            <div className="project-progress">
-              <span>
-                <strong>{p.progress}%</strong> complete
-              </span>
-              <span>{p.parcels} parcels</span>
-              <i>
-                <em style={{ width: `${p.progress}%` }}></em>
-              </i>
-            </div>
-            <small>
-              Target date · {p.target} <ArrowRight size={14} />
-            </small>
-          </Button>
-        ))}
-      </div>
+      
+      {loading && (
+        <div className="panel" style={{ padding: '24px', textAlign: 'center', color: '#557074' }}>
+          <span>Loading projects from live database...</span>
+        </div>
+      )}
+
+      {error && (
+        <div className="panel" style={{ padding: '14px 20px', background: '#fdf3f2', border: '1px solid #f5c6cb', color: '#721c24', marginBottom: '14px' }}>
+          <strong>API Connection Notice:</strong> {error} Showing offline project cache.
+        </div>
+      )}
+
+      {!loading && (
+        <div className="project-grid">
+          {displayProjects.map((p) => (
+            <Button key={p.id} className="project-card" onClick={() => navigate(`/projects/${p.id}`)}>
+              <div>
+                <span className="project-code">{p.id}</span>
+                <span className="status-label">{p.status}</span>
+              </div>
+              <h3>{p.name}</h3>
+              <p>
+                {p.type} · {p.district} district
+              </p>
+              <div className="project-progress">
+                <span>
+                  <strong>{p.progress}%</strong> complete
+                </span>
+                <span>{p.parcels} parcels</span>
+                <i>
+                  <em style={{ width: `${p.progress}%` }}></em>
+                </i>
+              </div>
+              <small>
+                Target date · {p.target} <ArrowRight size={14} />
+              </small>
+            </Button>
+          ))}
+        </div>
+      )}
+
+      {!loading && displayProjects.length === 0 && (
+        <div className="empty-state">
+          <Landmark size={24} />
+          <strong>No active projects found</strong>
+        </div>
+      )}
     </>
   )
 }
@@ -1281,25 +1440,66 @@ function ProjectDetail({
   selectedProjectTab: Record<string, string>
   setSelectedProjectTab: React.Dispatch<React.SetStateAction<Record<string, string>>>
 }) {
-  const activeTab = selectedProjectTab[project.id] || 'Overview'
+  const [liveDetail, setLiveDetail] = useState<{ raw: ApiProjectDetailResponse; ui: (typeof projects)[0] } | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let isMounted = true
+    setLoading(true)
+    setError(null)
+
+    fetchProjectByCode(project.id)
+      .then((data) => {
+        if (isMounted) {
+          setLiveDetail(data)
+          setLoading(false)
+        }
+      })
+      .catch((err) => {
+        if (isMounted) {
+          setError(err instanceof Error ? err.message : 'Unable to load project detail from live API.')
+          setLoading(false)
+        }
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [project.id])
+
+  const activeProject = liveDetail?.ui || project
+  const activeTab = selectedProjectTab[activeProject.id] || 'Overview'
 
   const setTab = (tab: string) => {
-    setSelectedProjectTab((prev) => ({ ...prev, [project.id]: tab }))
+    setSelectedProjectTab((prev) => ({ ...prev, [activeProject.id]: tab }))
   }
 
-  const projectParcels = parcels.filter((p) => p.project.includes(project.id) || project.id === 'NH-327')
-  const projectDisputes = disputes.filter((d) => d.projectId === project.id)
-  const projectDocuments = documents.filter((doc) => doc.projectId === project.id)
-  const projectAudit = auditEvents.filter((a) => a.projectId === project.id)
-
-  const analyzedParcelsInProject = projectParcels.filter((p) => aiCache[p.id])
+  const projectParcels = parcels.filter((p: Parcel) => p.project.includes(activeProject.id) || activeProject.id === 'NH-327')
+  const projectDisputes = disputes.filter((d: DisputeRecord) => d.projectId === activeProject.id)
+  const projectDocuments = (documents || []).filter((doc: DocumentRecord) => doc.projectId === activeProject.id)
+  const projectAudit = (auditEvents || []).filter((a: AuditEvent) => a.projectId === activeProject.id || a.parcelId?.includes(activeProject.id))
+  const analyzedParcelsInProject = projectParcels.filter((p: Parcel) => Boolean(aiCache[p.id]))
 
   return (
     <>
       <Button className="back-button" onClick={() => navigate('/projects')}>
         <ArrowLeft size={15} /> Back to projects
       </Button>
-      <Heading eyebrow={`PROJECT WORKSPACE · ${project.id}`} title={project.name} subtitle={`${project.type} · ${project.district} district · Target: ${project.target}`} action={<Button className="primary-button" onClick={() => notify(`Project settings saved for ${project.id}`)}>Update Project</Button>} />
+
+      {loading && (
+        <div className="panel" style={{ padding: '10px 16px', marginBottom: '12px' }}>
+          <small className="muted font-mono">Loading live project detail from PostgreSQL...</small>
+        </div>
+      )}
+
+      {error && (
+        <div className="panel" style={{ padding: '10px 16px', background: '#fdf3f2', border: '1px solid #f5c6cb', color: '#721c24', marginBottom: '12px' }}>
+          <small>API Notice: {error} Displaying session project view.</small>
+        </div>
+      )}
+
+      <Heading eyebrow={`PROJECT WORKSPACE · ${activeProject.id}`} title={activeProject.name} subtitle={`${activeProject.type} · ${activeProject.district} district · Target: ${activeProject.target}`} action={<Button className="primary-button" onClick={() => notify(`Project settings saved for ${activeProject.id}`)}>Update Project</Button>} />
 
       <div className="project-tabs">
         {['Overview', 'Parcels', 'Workflow', 'Documents', 'AI', 'Audit'].map((tab) => (
@@ -1308,6 +1508,7 @@ function ProjectDetail({
           </Button>
         ))}
       </div>
+
 
       {activeTab === 'Overview' && (
         <div className="project-detail-grid">
@@ -1427,7 +1628,7 @@ function ProjectDetail({
               </tr>
             </thead>
             <tbody>
-              {projectDocuments.map((doc) => (
+              {projectDocuments.map((doc: DocumentRecord) => (
                 <tr key={doc.id}>
                   <td>
                     <strong>{doc.title}</strong>
@@ -1463,13 +1664,13 @@ function ProjectDetail({
               <div style={{ background: '#f5f8f6', padding: '12px', borderRadius: '5px' }}>
                 <small style={{ fontSize: '9px', color: '#889896' }}>Max ML Risk</small>
                 <strong style={{ display: 'block', fontSize: '18px', color: '#d8634d' }}>
-                  {Math.round(Math.max(...analyzedParcelsInProject.map((p) => aiCache[p.id].prediction.risk_score)))} / 100
+                  {Math.round(Math.max(...analyzedParcelsInProject.map((p: Parcel) => aiCache[p.id].prediction.risk_score)))} / 100
                 </strong>
               </div>
               <div style={{ background: '#f5f8f6', padding: '12px', borderRadius: '5px' }}>
                 <small style={{ fontSize: '9px', color: '#889896' }}>Average ML Risk</small>
                 <strong style={{ display: 'block', fontSize: '18px', color: '#e9a23b' }}>
-                  {Math.round(analyzedParcelsInProject.reduce((acc, p) => acc + aiCache[p.id].prediction.risk_score, 0) / analyzedParcelsInProject.length)} / 100
+                  {Math.round(analyzedParcelsInProject.reduce((acc: number, p: Parcel) => acc + aiCache[p.id].prediction.risk_score, 0) / analyzedParcelsInProject.length)} / 100
                 </strong>
               </div>
             </div>
@@ -1495,7 +1696,7 @@ function ProjectDetail({
               </tr>
             </thead>
             <tbody>
-              {projectAudit.map((a) => (
+              {projectAudit.map((a: AuditEvent) => (
                 <tr key={a.id}>
                   <td>
                     <strong>{a.title}</strong>
