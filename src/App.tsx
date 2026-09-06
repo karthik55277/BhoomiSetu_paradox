@@ -750,7 +750,7 @@ function Page({
   if (route === '/audit') return <AuditView />
   if (route === '/analytics') return <AnalyticsView />
   if (route === '/settings') return <SettingsView notify={notify} />
-  return <Dashboard navigate={navigate} openParcel={openParcel} aiCache={aiCache} />
+  return <Dashboard currentUser={currentUser} navigate={navigate} openParcel={openParcel} aiCache={aiCache} />
 }
 
 function Heading({ eyebrow, title, subtitle, action }: { eyebrow?: string; title: string; subtitle: string; action?: React.ReactNode }) {
@@ -767,10 +767,12 @@ function Heading({ eyebrow, title, subtitle, action }: { eyebrow?: string; title
 }
 
 function Dashboard({
+  currentUser,
   navigate,
   openParcel,
   aiCache,
 }: {
+  currentUser: UserProfile | null
   navigate: (s: string) => void
   openParcel: (p: Parcel) => void
   aiCache: ParcelAnalysisCache
@@ -842,22 +844,24 @@ function Dashboard({
     ['Compensation', totalCompFormatted, '/compensation', 'blue'],
   ]
 
-  // Dynamically derive priority attention parcel from live risk scores
+  // Dynamically derive priority attention parcel from live risk scores using non-mutating reduce
   const priorityParcel = useMemo(() => {
     if (liveParcels.length === 0) return parcels[0]
-    return [...liveParcels].sort((a, b) => {
-      const scoreA = aiCache[a.id]?.prediction.risk_score ?? a.current_ai_result?.prediction.risk_score ?? a.risk
-      const scoreB = aiCache[b.id]?.prediction.risk_score ?? b.current_ai_result?.prediction.risk_score ?? b.risk
-      return scoreB - scoreA
-    })[0]
+    return liveParcels.reduce<Parcel>((highest, parcel) => {
+      const scoreCurrent = aiCache[parcel.id]?.prediction.risk_score ?? parcel.current_ai_result?.prediction?.risk_score ?? parcel.risk
+      const scoreHighest = aiCache[highest.id]?.prediction.risk_score ?? highest.current_ai_result?.prediction?.risk_score ?? highest.risk
+      return scoreCurrent > scoreHighest ? parcel : highest
+    }, liveParcels[0])
   }, [liveParcels, aiCache])
+
+  const activeJurisdiction = currentUser?.jurisdiction || 'Patna District'
 
   return (
     <>
       <Heading
-        eyebrow="NATIONAL LAND INTELLIGENCE · PATNA DISTRICT"
+        eyebrow={`NATIONAL LAND INTELLIGENCE · ${activeJurisdiction.toUpperCase()} OPERATIONS`}
         title="Command Center Overview"
-        subtitle="Real-time acquisition intelligence across projects, parcels, disputes, and field operations."
+        subtitle={`Real-time acquisition intelligence across projects, parcels, disputes, and field operations in ${activeJurisdiction}.`}
         action={
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
             {isLiveMode ? (
@@ -928,7 +932,7 @@ function Dashboard({
               {priorityParcel.id}
             </div>
             <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
-              {priorityParcel.project} · {priorityParcel.district || 'Patna District'} · {priorityParcel.survey}
+              {priorityParcel.project} · {priorityParcel.district || activeJurisdiction} · {priorityParcel.survey}
             </div>
           </div>
 
@@ -941,14 +945,14 @@ function Dashboard({
                 {aiCache[priorityParcel.id]?.prediction.risk_score ?? priorityParcel.current_ai_result?.prediction?.risk_score ?? priorityParcel.risk} / 100
               </div>
               <div style={{ fontSize: '10px', color: 'var(--text-subtle)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>
-                SHAP Composite Score
+                ML Risk Score
               </div>
             </div>
           </div>
         </div>
 
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
-          <span style={{ fontSize: '11px', color: 'var(--text-subtle)', fontWeight: 600 }}>Top risk factors:</span>
+          <span style={{ fontSize: '11px', color: 'var(--text-subtle)', fontWeight: 600 }}>Top SHAP Risk Contributors:</span>
           <span className="risk-pill medium" style={{ fontSize: '10px' }}>Ownership complexity (+18.4)</span>
           <span className="risk-pill medium" style={{ fontSize: '10px' }}>River Buffer Proximity (+14.2)</span>
           <span className="risk-pill medium" style={{ fontSize: '10px' }}>Historical Dispute (+11.8)</span>

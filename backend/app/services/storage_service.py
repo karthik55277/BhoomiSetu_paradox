@@ -207,46 +207,58 @@ class MinIOStorageEngine(BaseStorageEngine):
             pass  # Fallback gracefully if connection managed externally
 
     def save_file(self, file_obj: BinaryIO, filename: str, mime_type: str) -> Tuple[str, int, str]:
-        clean_name = sanitize_filename(filename)
-        now = datetime.utcnow()
-        doc_uuid = uuid.uuid4()
+        try:
+            clean_name = sanitize_filename(filename)
+            now = datetime.utcnow()
+            doc_uuid = uuid.uuid4()
 
-        header = file_obj.read(512)
-        if not header:
-            raise ValueError("Empty 0-byte files are not accepted.")
+            header = file_obj.read(512)
+            if not header:
+                raise ValueError("Empty 0-byte files are not accepted.")
 
-        ext = validate_file_content_signature(header, clean_name, mime_type)
-        relative_key = f"docs/{now.year}/{now.month:02d}/{doc_uuid}{ext}"
+            ext = validate_file_content_signature(header, clean_name, mime_type)
+            relative_key = f"docs/{now.year}/{now.month:02d}/{doc_uuid}{ext}"
 
-        # Combine header and rest of stream in memory buffer for upload
-        body = header + file_obj.read()
-        total_bytes = len(body)
-        if total_bytes > MAX_FILE_SIZE_BYTES:
-            raise ValueError("File size exceeds maximum allowed limit of 25 MB.")
+            # Combine header and rest of stream in memory buffer for upload
+            body = header + file_obj.read()
+            total_bytes = len(body)
+            if total_bytes > MAX_FILE_SIZE_BYTES:
+                raise ValueError("File size exceeds maximum allowed limit of 25 MB.")
 
-        buf = io.BytesIO(body)
-        self.client.put_object(
-            bucket_name=self.bucket,
-            object_name=relative_key,
-            data=buf,
-            length=total_bytes,
-            content_type=mime_type,
-        )
-        return relative_key, total_bytes, clean_name
+            buf = io.BytesIO(body)
+            self.client.put_object(
+                bucket_name=self.bucket,
+                object_name=relative_key,
+                data=buf,
+                length=total_bytes,
+                content_type=mime_type,
+            )
+            return relative_key, total_bytes, clean_name
+        except Exception as exc:
+            if isinstance(exc, ValueError):
+                raise exc
+            local_engine = LocalStorageEngine()
+            file_obj.seek(0)
+            return local_engine.save_file(file_obj, filename, mime_type)
 
     def get_file_stream(self, storage_key: str) -> BinaryIO:
         try:
             response = self.client.get_object(self.bucket, storage_key)
             return response  # Returns HTTP response stream
-        except Exception as exc:
-            raise FileNotFoundError(f"Object '{storage_key}' not found in MinIO bucket.") from exc
+        except Exception:
+            local_engine = LocalStorageEngine()
+            try:
+                return local_engine.get_file_stream(storage_key)
+            except Exception as exc:
+                raise FileNotFoundError(f"Object '{storage_key}' not found in storage.") from exc
 
     def delete_file(self, storage_key: str) -> bool:
         try:
             self.client.remove_object(self.bucket, storage_key)
             return True
         except Exception:
-            return False
+            local_engine = LocalStorageEngine()
+            return local_engine.delete_file(storage_key)
 
 
 def get_storage_engine() -> BaseStorageEngine:
