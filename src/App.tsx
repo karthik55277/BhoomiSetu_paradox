@@ -4,18 +4,20 @@ import {
   buildParcelRiskInput,
   explainRisk,
   fetchGisParcels,
+  fetchParcelAiHistory,
   fetchParcelDetail,
   fetchParcels,
   fetchProjectByCode,
   fetchProjects,
   formatFeatureName,
   mapGisFeatureToParcel,
-  predictRisk,
+  type ApiAiAnalysisRecord,
   type ApiGeoJSONFeature,
   type ApiParcelDetailResponse,
   type ApiProjectDetailResponse,
   type ParcelAnalysis,
   type ParcelAnalysisCache,
+  type RiskPredictionResponse,
 } from './api'
 import { getRiskLabel, initialAuditEvents, initialCompensations, initialDisputes, initialDocuments, parcels, projects, stages, type AuditEvent, type CompensationRecord, type DisputeRecord, type DocumentRecord, type Parcel } from './data'
 import './App.css'
@@ -117,10 +119,17 @@ function App() {
     setAnalyzingMap((prev) => ({ ...prev, [parcel.id]: true }))
     try {
       const payload = buildParcelRiskInput(parcel)
-      const [prediction, explanation] = await Promise.all([
-        predictRisk(payload),
-        explainRisk(payload, 5),
-      ])
+      const explanation = await explainRisk(payload, 5, parcel.id)
+      const prediction: RiskPredictionResponse = {
+        risk_score: explanation.risk_score,
+        risk_level: explanation.risk_level,
+        risk_probability: explanation.risk_probability,
+        acquisition_risk: explanation.acquisition_risk,
+        model_version: explanation.model_version,
+        analysis_id: explanation.analysis_id,
+        persisted_at: explanation.persisted_at,
+        is_persisted: explanation.is_persisted ?? true,
+      }
 
       const analysisResult: ParcelAnalysis = {
         prediction,
@@ -412,7 +421,7 @@ function Page({
   }
   if (route === '/parcels') return <ParcelList openParcel={openParcel} aiCache={aiCache} />
   if (route === '/gis') return <GIS selected={selected} setSelected={setSelected} openParcel={openParcel} notify={notify} aiCache={aiCache} getOrFetchParcelAnalysis={getOrFetchParcelAnalysis} isAnalyzing={!!analyzingMap[selected.id]} gisLayers={gisLayers} setGisLayers={setGisLayers} />
-  if (route === '/ai') return <AI notify={notify} aiCache={aiCache} getOrFetchParcelAnalysis={getOrFetchParcelAnalysis} analyzingMap={analyzingMap} />
+  if (route === '/ai') return <AI notify={notify} navigate={navigate} aiCache={aiCache} getOrFetchParcelAnalysis={getOrFetchParcelAnalysis} analyzingMap={analyzingMap} />
   if (route.startsWith('/projects/')) {
     const projId = route.split('/')[2]
     const project = projects.find((p) => p.id === projId) || projects[0]
@@ -1301,28 +1310,60 @@ function Field({ label, value }: { label: string; value: string }) {
 
 function AI({
   notify,
+  navigate,
   aiCache,
   getOrFetchParcelAnalysis,
   analyzingMap,
 }: {
   notify: (s: string) => void
+  navigate: (s: string) => void
   aiCache: ParcelAnalysisCache
   getOrFetchParcelAnalysis: (p: Parcel, force?: boolean) => Promise<ParcelAnalysis>
   analyzingMap: Record<string, boolean>
 }) {
   const [running, setRunning] = useState(false)
+  const [selectedParcelId, setSelectedParcelId] = useState<string>('BR-042-0187')
+  const [historyRecords, setHistoryRecords] = useState<ApiAiAnalysisRecord[]>([])
+  const [historyLoading, setHistoryLoading] = useState<boolean>(false)
+  const [historyError, setHistoryError] = useState<string | null>(null)
 
   const runBatchAnalysis = async () => {
     setRunning(true)
     try {
       await Promise.all(parcels.map((p) => getOrFetchParcelAnalysis(p, true)))
-      notify('All candidate parcels analyzed using live ML pipeline.')
+      notify('All candidate parcels evaluated & persisted to PostgreSQL.')
     } catch {
       notify('Some parcels failed during batch ML evaluation.')
     } finally {
       setRunning(false)
     }
   }
+
+  // Fetch AI evaluation history specifically for selected parcel
+  useEffect(() => {
+    let isMounted = true
+    setHistoryLoading(true)
+    setHistoryError(null)
+
+    fetchParcelAiHistory(selectedParcelId)
+      .then((records) => {
+        if (isMounted) {
+          setHistoryRecords(records)
+          setHistoryLoading(false)
+        }
+      })
+      .catch((err) => {
+        if (isMounted) {
+          setHistoryError(err instanceof Error ? err.message : 'No PostgreSQL history found for selected parcel.')
+          setHistoryRecords([])
+          setHistoryLoading(false)
+        }
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [selectedParcelId, aiCache])
 
   // Derive rankings from shared aiCache + parcels
   const evaluatedList = parcels.map((p) => {
@@ -1332,16 +1373,18 @@ function AI({
       riskScore: cached ? cached.prediction.risk_score : p.risk,
       riskLevel: cached ? cached.prediction.risk_level : getRiskLabel(p.risk),
       isAnalyzed: !!cached,
+      isPersisted: cached ? (cached.prediction.is_persisted ?? true) : false,
       contributors: cached ? cached.explanation.contributors : [],
+      analysisId: cached?.prediction.analysis_id,
+      modelVersion: cached?.prediction.model_version || 'acquisition-risk-0.1.0',
     }
   })
 
   const sortedByRisk = [...evaluatedList].sort((a, b) => b.riskScore - a.riskScore)
-  const topEvaluated = sortedByRisk[0]
-  const isAnyAnalyzed = evaluatedList.some((item) => item.isAnalyzed)
+  const selectedEvaluated = evaluatedList.find((item) => item.parcel.id === selectedParcelId) || sortedByRisk[0]
 
-  const highestRiskScore = Math.round(topEvaluated.riskScore)
-  const highestRiskLevel = topEvaluated.riskLevel
+  const highestRiskScore = Math.round(sortedByRisk[0].riskScore)
+  const highestRiskLevel = sortedByRisk[0].riskLevel
   const medianDelay = '5.8 mo'
 
   return (
@@ -1363,7 +1406,9 @@ function AI({
           <strong>Decision support, not an automated decision</strong>
           <span>Use ML explanations to prioritize officer review. Authorized district officers make final acquisition decisions.</span>
         </div>
-        <span className="demo-tag">DEMO SESSION STATE</span>
+        <span className={`demo-tag ${selectedEvaluated.isPersisted ? 'live' : ''}`} style={{ background: selectedEvaluated.isPersisted ? '#cce5d8' : '#e2e9e6', color: selectedEvaluated.isPersisted ? '#1f4d38' : '#557074' }}>
+          {selectedEvaluated.isPersisted ? 'POSTGRES PERSISTED' : 'DEMO / NON-PERSISTED'}
+        </span>
       </div>
 
       <div className="ai-workspace">
@@ -1371,7 +1416,7 @@ function AI({
           <div className="panel-head">
             <div>
               <h3>NH-327 Ring Road Candidate Ranking</h3>
-              <p>{evaluatedList.filter((e) => e.isAnalyzed).length} of {parcels.length} parcels analyzed with ML model</p>
+              <p>{evaluatedList.filter((e) => e.isAnalyzed).length} of {parcels.length} parcels evaluated & persisted</p>
             </div>
           </div>
 
@@ -1395,12 +1440,20 @@ function AI({
 
           <div className="rank-list">
             {sortedByRisk.map((item, i) => (
-              <div key={item.parcel.id}>
+              <div
+                key={item.parcel.id}
+                style={{
+                  cursor: 'pointer',
+                  borderLeft: selectedParcelId === item.parcel.id ? '3px solid #315761' : '3px solid transparent',
+                  background: selectedParcelId === item.parcel.id ? '#f2f7f5' : undefined,
+                }}
+                onClick={() => setSelectedParcelId(item.parcel.id)}
+              >
                 <b>{String(i + 1).padStart(2, '0')}</b>
                 <span>
                   <strong>{item.parcel.id}</strong>
                   <small>
-                    {item.parcel.area} · {item.parcel.landUse} · {item.isAnalyzed ? 'ML Verified' : 'Seeded'}
+                    {item.parcel.area} · {item.parcel.landUse} · {item.isAnalyzed ? (item.isPersisted ? 'PostgreSQL Saved' : 'ML Verified') : 'Seeded Baseline'}
                   </small>
                 </span>
                 <i className="suitability-bar">
@@ -1419,35 +1472,86 @@ function AI({
           <div className="panel-head">
             <div>
               <h3>SHAP Risk Explanation</h3>
-              <p>{topEvaluated.parcel.id} · Top Feature Attributions</p>
+              <p>{selectedEvaluated.parcel.id} · Feature Attributions ({selectedEvaluated.modelVersion})</p>
             </div>
+            <span className={`risk-pill ${selectedEvaluated.riskScore > 60 ? 'high' : 'medium'}`}>
+              {selectedEvaluated.riskLevel}
+            </span>
           </div>
 
-          {topEvaluated.contributors.length > 0 ? (
+          {selectedEvaluated.contributors.length > 0 ? (
             <div className="reason-list">
-              <strong>ML Model SHAP Contributors ({topEvaluated.parcel.id})</strong>
-              {topEvaluated.contributors.map((c, i) => (
-                <div key={i} className="small-reason" style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', padding: '4px 0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <strong style={{ fontSize: '11px' }}>SHAP Relative Impact ({selectedEvaluated.parcel.id})</strong>
+                <Button
+                  className="quiet-button"
+                  style={{ padding: '2px 6px', fontSize: '10px' }}
+                  onClick={() => getOrFetchParcelAnalysis(selectedEvaluated.parcel, true)}
+                  disabled={!!analyzingMap[selectedEvaluated.parcel.id]}
+                >
+                  <RefreshCw size={11} /> {analyzingMap[selectedEvaluated.parcel.id] ? 'Re-analyzing...' : 'Re-run Model'}
+                </Button>
+              </div>
+
+              {selectedEvaluated.contributors.map((c, i) => (
+                <div key={i} className="small-reason" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', padding: '6px 0', borderBottom: '1px solid #f0f4f2' }}>
                   <span>{formatFeatureName(c.feature)}</span>
-                  <b className={c.impact >= 0 ? '' : 'negative'} style={{ color: c.impact >= 0 ? '#c45c49' : '#4d9a78' }}>
-                    {c.impact >= 0 ? '+' : '-'}{Math.abs(c.impact).toFixed(2)}
-                  </b>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ width: '60px', height: '6px', background: '#e5ebe8', borderRadius: '3px', overflow: 'hidden' }}>
+                      <div
+                        style={{
+                          width: `${Math.min(100, Math.abs(c.impact) * 4)}%`,
+                          height: '100%',
+                          background: c.impact >= 0 ? '#d8634d' : '#54a884',
+                        }}
+                      />
+                    </div>
+                    <b className={c.impact >= 0 ? '' : 'negative'} style={{ color: c.impact >= 0 ? '#c45c49' : '#4d9a78', minWidth: '45px', textAlign: 'right' }}>
+                      {c.impact >= 0 ? '+' : '-'}{Math.abs(c.impact).toFixed(2)}
+                    </b>
+                  </div>
                 </div>
               ))}
             </div>
           ) : (
             <div className="empty-state">
               <Sparkles size={24} />
-              <strong>No ML analysis cached for top parcel</strong>
-              <span>Click "Analyze All Candidate Parcels" above to calculate live SHAP values.</span>
+              <strong>No ML SHAP analysis cached for {selectedEvaluated.parcel.id}</strong>
+              <Button className="primary-button" style={{ marginTop: '8px' }} onClick={() => getOrFetchParcelAnalysis(selectedEvaluated.parcel, true)}>
+                Run ML Analysis for {selectedEvaluated.parcel.id}
+              </Button>
             </div>
           )}
 
-          {!isAnyAnalyzed && (
-            <div style={{ padding: '15px 19px', fontSize: '10px', color: '#889896' }}>
-              <em>Note: Risk scores currently reflect initial seeded baselines. Click "Analyze All Candidate Parcels" to trigger the FastAPI backend model.</em>
-            </div>
-          )}
+          {/* Historical Analysis Timeline */}
+          <div style={{ marginTop: '20px', paddingTop: '15px', borderTop: '1px solid #e2ece7' }}>
+            <h4 style={{ fontSize: '12px', font: '700 12px Georgia, serif', color: '#294b55', marginBottom: '8px' }}>
+              PostgreSQL Evaluation History ({selectedEvaluated.parcel.id})
+            </h4>
+
+            {historyLoading && <small className="muted font-mono">Fetching evaluation timeline from PostgreSQL...</small>}
+            {historyError && <small style={{ color: '#721c24' }}>Notice: {historyError}</small>}
+
+            {historyRecords.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '180px', overflowY: 'auto' }}>
+                {historyRecords.map((rec) => (
+                  <div key={rec.id} style={{ background: rec.is_current ? '#f5faf7' : '#fafcfc', border: rec.is_current ? '1px solid #cce5d8' : '1px solid #e8f0eb', padding: '8px 10px', borderRadius: '4px', fontSize: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                      <strong>Score: {Math.round(rec.risk_score)} / 100 ({rec.risk_level})</strong>
+                      <span style={{ background: rec.is_current ? '#1f4d38' : '#889896', color: '#fff', padding: '1px 5px', borderRadius: '3px', fontSize: '8px' }}>
+                        {rec.is_current ? 'CURRENT' : 'HISTORICAL'}
+                      </span>
+                    </div>
+                    <div style={{ color: '#687876', fontSize: '9px' }}>
+                      Version: <code>{rec.model_version}</code> · {new Date(rec.created_at).toLocaleString()}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              !historyLoading && <small className="muted">No historical runs recorded in database yet.</small>
+            )}
+          </div>
         </div>
       </div>
     </>

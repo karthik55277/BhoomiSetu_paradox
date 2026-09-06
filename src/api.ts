@@ -150,17 +150,19 @@ export function buildParcelRiskInput(parcel: Parcel): LandRiskInput {
   }
 }
 
-export async function predictRisk(payload: LandRiskInput): Promise<RiskPredictionResponse> {
+export async function predictRisk(payload: LandRiskInput, parcelId?: string): Promise<RiskPredictionResponse> {
+  const body = parcelId ? { ...payload, parcel_id: parcelId } : payload
   return requestJson<RiskPredictionResponse>('/api/v1/ai/risk/predict', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   })
 }
 
-export async function explainRisk(payload: LandRiskInput, limit = 5): Promise<RiskExplanationResponse> {
+export async function explainRisk(payload: LandRiskInput, limit = 5, parcelId?: string): Promise<RiskExplanationResponse> {
+  const body = parcelId ? { ...payload, parcel_id: parcelId } : payload
   return requestJson<RiskExplanationResponse>(`/api/v1/ai/risk/explain?limit=${limit}`, {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   })
 }
 
