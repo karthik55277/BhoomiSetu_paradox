@@ -32,6 +32,7 @@ export async function requestJson<T>(path: string, options: RequestInit = {}): P
     if (!response.ok) {
       if (response.status === 401) {
         localStorage.removeItem('bhoomisetu_token')
+        localStorage.removeItem('bhoomisetu_access_token')
         localStorage.removeItem('bhoomisetu_user')
         window.dispatchEvent(new Event('bhoomisetu_auth_401'))
       }

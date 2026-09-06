@@ -28,14 +28,15 @@ export interface LoginPayload {
   password?: string
 }
 
+import { wsService } from './websocket'
+
 export const SEEDED_ACCOUNTS = [
   { email: 'anil.kumar@bhoomisetu.gov.in', name: 'Anil Kumar', role: 'district_officer', roleLabel: 'District Officer' },
   { email: 'ramesh.verma@bhoomisetu.gov.in', name: 'Ramesh Verma', role: 'field_surveyor', roleLabel: 'Field Surveyor' },
   { email: 'priya.sharma@bhoomisetu.gov.in', name: 'Priya Sharma', role: 'acquisition_officer', roleLabel: 'Acquisition Officer' },
-  { email: 'rajesh.verma@bhoomisetu.gov.in', name: 'Rajesh Verma', role: 'legal_officer', roleLabel: 'Legal Officer' },
-  { email: 'sunita.rao@bhoomisetu.gov.in', name: 'Sunita Rao', role: 'auditor', roleLabel: 'Auditor' },
-  { email: 'vikram.singh@bhoomisetu.gov.in', name: 'Vikram Singh', role: 'system_admin', roleLabel: 'System Admin' },
-  { email: 'viewer.user@bhoomisetu.gov.in', name: 'Public Viewer', role: 'viewer', roleLabel: 'Viewer' },
+  { email: 'rk.verma@bhoomisetu.gov.in', name: 'R. K. Verma', role: 'legal_officer', roleLabel: 'Legal Officer' },
+  { email: 'auditor@bhoomisetu.gov.in', name: 'Auditor Desk', role: 'auditor', roleLabel: 'Auditor' },
+  { email: 'admin@bhoomisetu.gov.in', name: 'System Admin', role: 'system_admin', roleLabel: 'System Admin' },
 ]
 
 export async function loginApi(payload: LoginPayload): Promise<TokenResponse> {
@@ -47,6 +48,7 @@ export async function loginApi(payload: LoginPayload): Promise<TokenResponse> {
     }),
   })
   localStorage.setItem('bhoomisetu_token', data.access_token)
+  localStorage.setItem('bhoomisetu_access_token', data.access_token)
   localStorage.setItem('bhoomisetu_user', JSON.stringify(data.user))
   return data
 }
@@ -66,6 +68,9 @@ export function getStoredUser(): UserProfile | null {
 }
 
 export function logoutApi(): void {
+  wsService.disconnect()
   localStorage.removeItem('bhoomisetu_token')
+  localStorage.removeItem('bhoomisetu_access_token')
   localStorage.removeItem('bhoomisetu_user')
 }
+

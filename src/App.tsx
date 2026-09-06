@@ -135,6 +135,8 @@ function App() {
   const [showUserModal, setShowUserModal] = useState(false)
   const [isDemoModalOpen, setIsDemoModalOpen] = useState(false)
   const [wsStatus, setWsStatus] = useState<ConnectionStatus>('OFFLINE')
+  const [switchingEmail, setSwitchingEmail] = useState<string | null>(null)
+  const [switchError, setSwitchError] = useState<string | null>(null)
 
   const notify = (message: string) => {
     setToast(message)
@@ -188,7 +190,7 @@ function App() {
   }, [])
 
   const initAppAuth = useCallback(async (): Promise<UserProfile | null> => {
-    const token = localStorage.getItem('bhoomisetu_token')
+    const token = localStorage.getItem('bhoomisetu_token') || localStorage.getItem('bhoomisetu_access_token')
     if (token) {
       try {
         const user = await getCurrentUserApi()
@@ -198,6 +200,7 @@ function App() {
         return user
       } catch {
         localStorage.removeItem('bhoomisetu_token')
+        localStorage.removeItem('bhoomisetu_access_token')
         localStorage.removeItem('bhoomisetu_user')
       }
     }
@@ -221,7 +224,9 @@ function App() {
     })
 
     const handleAuth401 = () => {
-      loginApi({ email: 'anil.kumar@bhoomisetu.gov.in', password: 'bhoomisetu123' })
+      const storedUser = getStoredUser()
+      const emailToUse = storedUser?.email || currentUser?.email || 'anil.kumar@bhoomisetu.gov.in'
+      loginApi({ email: emailToUse, password: 'bhoomisetu123' })
         .then((res) => {
           setCurrentUser(res.user)
           wsService.connect()
@@ -237,9 +242,12 @@ function App() {
 
     window.addEventListener('bhoomisetu_auth_401', handleAuth401)
     return () => window.removeEventListener('bhoomisetu_auth_401', handleAuth401)
-  }, [initAppAuth])
+  }, [currentUser?.email, initAppAuth])
 
   const handleSwitchAccount = async (email: string) => {
+    if (switchingEmail !== null) return
+    setSwitchingEmail(email)
+    setSwitchError(null)
     try {
       wsService.disconnect()
       const res = await loginApi({ email })
@@ -247,13 +255,17 @@ function App() {
       setShowUserModal(false)
       setMenuOpen(false)
       notify(`Authenticated as ${res.user.full_name} (${res.user.role_name})`)
+      console.log(`Authenticated account switched to ${res.user.full_name} (${res.user.role_name})`)
       wsService.connect()
       fetchDisputes().then((r) => setDisputes(r.items.map(mapApiDisputeToUi))).catch(() => {})
       fetchDocuments().then((r) => setDocuments(r.items.map(mapApiDocumentToUi))).catch(() => {})
       fetchAuditEvents().then((r) => setAuditEvents(r.items.map(mapApiAuditEventToUi))).catch(() => {})
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Login failed'
+      setSwitchError(msg)
       notify(`Authentication failed: ${msg}`)
+    } finally {
+      setSwitchingEmail(null)
     }
   }
 
@@ -566,6 +578,7 @@ function App() {
         isOpen={isDemoModalOpen}
         onClose={() => setIsDemoModalOpen(false)}
         onSwitchUser={(user) => {
+          wsService.disconnect()
           setCurrentUser(user)
           wsService.connect()
         }}
@@ -580,22 +593,41 @@ function App() {
       )}
 
       {showUserModal && (
-        <div className="modal-backdrop" onClick={() => setShowUserModal(false)}>
+        <div className="modal-backdrop" onClick={() => !switchingEmail && setShowUserModal(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px', padding: '24px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>Authenticating User Account</h3>
-              <Button className="icon-button" onClick={() => setShowUserModal(false)}>✕</Button>
+              <Button className="icon-button" disabled={switchingEmail !== null} onClick={() => setShowUserModal(false)}>✕</Button>
             </div>
-            <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '20px' }}>
+            <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '16px' }}>
               Select a seeded government role account to authenticate via FastAPI JWT token:
             </p>
+            {switchError && (
+              <div style={{
+                padding: '10px 14px',
+                borderRadius: '6px',
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                color: '#ef4444',
+                fontSize: '13px',
+                marginBottom: '16px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}>
+                <AlertTriangle size={16} />
+                <span>{switchError}</span>
+              </div>
+            )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {SEEDED_ACCOUNTS.map((acc) => {
                 const isCurrent = currentUser?.email === acc.email
+                const isThisSwitching = switchingEmail === acc.email
                 return (
                   <button
                     key={acc.email}
                     type="button"
+                    disabled={switchingEmail !== null}
                     onClick={() => handleSwitchAccount(acc.email)}
                     style={{
                       display: 'flex',
@@ -606,12 +638,15 @@ function App() {
                       border: isCurrent ? '1px solid var(--primary)' : '1px solid var(--border)',
                       background: isCurrent ? 'rgba(59, 130, 246, 0.08)' : 'var(--bg-card)',
                       color: 'var(--text-main)',
-                      cursor: 'pointer',
+                      cursor: switchingEmail !== null ? 'not-allowed' : 'pointer',
+                      opacity: switchingEmail !== null && !isThisSwitching ? 0.6 : 1,
                       textAlign: 'left',
                     }}
                   >
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: '14px' }}>{acc.name}</div>
+                      <div style={{ fontWeight: 600, fontSize: '14px' }}>
+                        {acc.name} {isThisSwitching && <span style={{ fontSize: '12px', color: 'var(--primary)', marginLeft: '6px' }}>(Signing in...)</span>}
+                      </div>
                       <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{acc.email}</div>
                     </div>
                     <span style={{
@@ -622,7 +657,7 @@ function App() {
                       background: isCurrent ? 'var(--primary)' : 'var(--bg-tag)',
                       color: isCurrent ? '#fff' : 'var(--text-muted)'
                     }}>
-                      {acc.roleLabel}
+                      {isThisSwitching ? 'Signing in...' : acc.roleLabel}
                     </span>
                   </button>
                 )

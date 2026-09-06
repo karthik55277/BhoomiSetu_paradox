@@ -118,7 +118,7 @@ export const DemoStoryModal: React.FC<DemoStoryModalProps> = ({
   const handleResetDemoData = async () => {
     setResetting(true)
     try {
-      const token = localStorage.getItem('bhoomisetu_jwt')
+      const token = localStorage.getItem('bhoomisetu_token') || localStorage.getItem('bhoomisetu_access_token')
       const res = await fetch('/api/v1/demo/reset', {
         method: 'POST',
         headers: {
