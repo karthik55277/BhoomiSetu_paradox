@@ -16,6 +16,8 @@ from app.models.projects import Project
 from app.models.users import User
 from app.schemas_v1 import DisputeResponse, DisputeUpdate, PaginatedResponse
 from app.services.audit_service import create_audit_event
+from app.services.event_publisher import publish_system_event
+
 
 router = APIRouter(prefix="/disputes", tags=["disputes"])
 
@@ -146,6 +148,21 @@ def update_dispute(
             project_id=dispute.project_id,
         )
         db.commit()
+
+        publish_system_event(
+            event_type="DISPUTE_UPDATE",
+            title=f"Dispute {dispute.dispute_code} Updated",
+            message=f"Dispute status updated to '{dispute.status}'",
+            data={
+                "dispute_id": str(dispute.id),
+                "dispute_code": dispute.dispute_code,
+                "parcel_id": dispute.parcel.parcel_id if dispute.parcel else str(dispute.parcel_id),
+                "project_id": str(dispute.project_id),
+                "status": dispute.status,
+            },
+            target_roles=["district_officer", "legal_officer", "system_admin"],
+        )
+
 
     res = DisputeResponse.model_validate(dispute)
     res.parcel_id_str = dispute.parcel.parcel_id if dispute.parcel else None

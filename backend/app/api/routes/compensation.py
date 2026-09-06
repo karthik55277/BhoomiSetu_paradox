@@ -16,6 +16,8 @@ from app.models.projects import Project
 from app.models.users import User
 from app.schemas_v1 import CompensationResponse, CompensationUpdate, PaginatedResponse
 from app.services.audit_service import create_audit_event
+from app.services.event_publisher import publish_system_event
+
 
 router = APIRouter(prefix="/compensation", tags=["compensation"])
 
@@ -145,6 +147,21 @@ def update_compensation(
             project_id=comp.project_id,
         )
         db.commit()
+
+        publish_system_event(
+            event_type="COMPENSATION_UPDATE",
+            title=f"Compensation {comp.record_code} Updated",
+            message=f"Compensation status updated to '{comp.status}'",
+            data={
+                "compensation_id": str(comp.id),
+                "record_code": comp.record_code,
+                "parcel_id": comp.parcel.parcel_id if comp.parcel else str(comp.parcel_id),
+                "status": comp.status,
+                "amount_inr": float(comp.amount_inr),
+            },
+            target_roles=["district_officer", "acquisition_officer", "system_admin"],
+        )
+
 
     res = CompensationResponse.model_validate(comp)
     res.parcel_id_str = comp.parcel.parcel_id if comp.parcel else None

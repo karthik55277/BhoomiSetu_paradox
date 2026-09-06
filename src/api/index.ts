@@ -11,5 +11,6 @@ export * from './disputes'
 export * from './compensation'
 export * from './documents'
 export * from './audit'
+export * from './websocket'
 
 

@@ -34,6 +34,9 @@ import {
   type ParcelAnalysis,
   type ParcelAnalysisCache,
   type RiskPredictionResponse,
+  wsService,
+  type SystemEvent,
+  type ConnectionStatus,
 } from './api'
 import { getStoredUser, getCurrentUserApi, loginApi, logoutApi, SEEDED_ACCOUNTS, type UserProfile } from './api/auth'
 import { getRiskLabel, initialAuditEvents, initialDisputes, initialDocuments, parcels, projects, stages, type AuditEvent, type CompensationRecord, type DisputeRecord, type DocumentRecord, type Parcel } from './data'
@@ -127,11 +130,54 @@ function App() {
   // Authentication & Session State
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => getStoredUser())
   const [showUserModal, setShowUserModal] = useState(false)
+  const [wsStatus, setWsStatus] = useState<ConnectionStatus>('OFFLINE')
 
   const notify = (message: string) => {
     setToast(message)
     window.setTimeout(() => setToast(''), 2800)
   }
+
+  useEffect(() => {
+    const unsubStatus = wsService.subscribeStatus((status) => {
+      setWsStatus(status)
+    })
+
+    const unsubEvents = wsService.subscribeEvents((event: SystemEvent) => {
+      setUnread((prev) => prev + 1)
+      notify(`🔔 [${event.title}] ${event.message}`)
+
+      // Targeted page refresh based on event_type
+      switch (event.event_type) {
+        case 'DISPUTE_UPDATE':
+          fetchDisputes().then((res) => setDisputes(res.items.map(mapApiDisputeToUi))).catch(() => {})
+          fetchAuditEvents().then((res) => setAuditEvents(res.items.map(mapApiAuditEventToUi))).catch(() => {})
+          window.dispatchEvent(new CustomEvent('bhoomisetu_realtime_event', { detail: event }))
+          break
+        case 'COMPENSATION_UPDATE':
+          fetchAuditEvents().then((res) => setAuditEvents(res.items.map(mapApiAuditEventToUi))).catch(() => {})
+          window.dispatchEvent(new CustomEvent('bhoomisetu_realtime_event', { detail: event }))
+          break
+        case 'DOCUMENT_UPLOAD':
+          fetchDocuments().then((res) => setDocuments(res.items.map(mapApiDocumentToUi))).catch(() => {})
+          fetchAuditEvents().then((res) => setAuditEvents(res.items.map(mapApiAuditEventToUi))).catch(() => {})
+          window.dispatchEvent(new CustomEvent('bhoomisetu_realtime_event', { detail: event }))
+          break
+        case 'AI_HIGH_RISK_ALERT':
+          fetchAuditEvents().then((res) => setAuditEvents(res.items.map(mapApiAuditEventToUi))).catch(() => {})
+          window.dispatchEvent(new CustomEvent('bhoomisetu_realtime_event', { detail: event }))
+          break
+        default:
+          fetchAuditEvents().then((res) => setAuditEvents(res.items.map(mapApiAuditEventToUi))).catch(() => {})
+          window.dispatchEvent(new CustomEvent('bhoomisetu_realtime_event', { detail: event }))
+          break
+      }
+    })
+
+    return () => {
+      unsubStatus()
+      unsubEvents()
+    }
+  }, [])
 
   useEffect(() => {
     const token = localStorage.getItem('bhoomisetu_token')
@@ -140,20 +186,28 @@ function App() {
         .then((user) => {
           setCurrentUser(user)
           localStorage.setItem('bhoomisetu_user', JSON.stringify(user))
+          wsService.connect()
         })
         .catch(() => {
           loginApi({ email: 'anil.kumar@bhoomisetu.gov.in' })
-            .then((res) => setCurrentUser(res.user))
+            .then((res) => {
+              setCurrentUser(res.user)
+              wsService.connect()
+            })
             .catch(() => {})
         })
     } else {
       loginApi({ email: 'anil.kumar@bhoomisetu.gov.in' })
-        .then((res) => setCurrentUser(res.user))
+        .then((res) => {
+          setCurrentUser(res.user)
+          wsService.connect()
+        })
         .catch(() => {})
     }
 
     const handleAuth401 = () => {
       setCurrentUser(null)
+      wsService.disconnect()
       notify('Session expired or unauthorized. Please log in.')
       setShowUserModal(true)
     }
@@ -164,11 +218,13 @@ function App() {
 
   const handleSwitchAccount = async (email: string) => {
     try {
+      wsService.disconnect()
       const res = await loginApi({ email })
       setCurrentUser(res.user)
       setShowUserModal(false)
       setMenuOpen(false)
       notify(`Authenticated as ${res.user.full_name} (${res.user.role_name})`)
+      wsService.connect()
       fetchDisputes().then((r) => setDisputes(r.items.map(mapApiDisputeToUi))).catch(() => {})
       fetchDocuments().then((r) => setDocuments(r.items.map(mapApiDocumentToUi))).catch(() => {})
       fetchAuditEvents().then((r) => setAuditEvents(r.items.map(mapApiAuditEventToUi))).catch(() => {})
@@ -360,8 +416,19 @@ function App() {
             )}
           </div>
           <div className="top-actions">
-            <div className="demo-badge">
-              <span></span> {currentUser ? `JWT Auth: ${currentUser.role_name}` : 'Seeded demo data'}
+            <div className="demo-badge" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                backgroundColor: wsStatus === 'CONNECTED' ? '#10b981' : wsStatus === 'CONNECTING' || wsStatus === 'RECONNECTING' ? '#f59e0b' : '#ef4444',
+                display: 'inline-block'
+              }}></span>
+              <strong style={{ fontSize: '11px', letterSpacing: '0.03em' }}>
+                {wsStatus === 'CONNECTED' ? 'LIVE WS' : wsStatus === 'CONNECTING' || wsStatus === 'RECONNECTING' ? 'RECONNECTING' : 'OFFLINE'}
+              </strong>
+              <span>·</span>
+              <span>{currentUser ? `${currentUser.role_name}` : 'Seeded data'}</span>
             </div>
             <Button
               className="icon-button"

@@ -18,7 +18,9 @@ from sqlalchemy.orm import Session
 from app.models.ai_analysis import AIAnalysisResult
 from app.models.parcels import Parcel
 from app.services.audit_service import create_audit_event
+from app.services.event_publisher import publish_system_event
 from app.services.ml_service import MODEL_VERSION, explain_single_record
+
 
 logger = logging.getLogger("ai_persistence_service")
 
@@ -124,7 +126,23 @@ def persist_ai_analysis(
 
         db.commit()
         db.refresh(ai_result)
+
+        if prediction.get("risk_level") in ["HIGH", "CRITICAL"]:
+            publish_system_event(
+                event_type="AI_HIGH_RISK_ALERT",
+                title=f"High Risk Alert: Parcel {parcel.parcel_id}",
+                message=f"AI evaluation detected {prediction.get('risk_level')} risk ({prediction.get('risk_score')})",
+                data={
+                    "parcel_id": parcel.parcel_id,
+                    "risk_score": prediction.get("risk_score"),
+                    "risk_level": prediction.get("risk_level"),
+                    "analysis_id": str(ai_result.id),
+                },
+                target_roles=["district_officer", "acquisition_officer", "system_admin"],
+            )
+
         logger.info(f"Persisted AIAnalysisResult {ai_result.id} for parcel {parcel.parcel_id}")
+
         return ai_result
 
     except Exception as exc:

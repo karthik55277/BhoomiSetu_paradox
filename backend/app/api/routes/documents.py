@@ -16,7 +16,9 @@ from app.models.projects import Project
 from app.models.users import User
 from app.schemas_v1 import DocumentCreate, DocumentResponse, PaginatedResponse
 from app.services.audit_service import create_audit_event
+from app.services.event_publisher import publish_system_event
 from app.services.storage_service import get_storage_engine
+
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -176,6 +178,20 @@ def upload_document_file(
 
         db.commit()
         db.refresh(doc)
+
+        publish_system_event(
+            event_type="DOCUMENT_UPLOAD",
+            title=f"Document {doc.document_code} Uploaded",
+            message=f"New document '{doc.title}' uploaded",
+            data={
+                "document_id": str(doc.id),
+                "document_code": doc.document_code,
+                "title": doc.title,
+                "category": doc.category,
+            },
+            target_roles=["district_officer", "acquisition_officer", "legal_officer", "system_admin"],
+        )
+
     except Exception as exc:
         db.rollback()
         # Compensation: Cleanup orphaned storage object if database transaction fails

@@ -32,3 +32,6 @@ env/
 *.njsproj
 *.sln
 *.sw?
+
+# Storage uploads
+backend/storage/uploads/*
