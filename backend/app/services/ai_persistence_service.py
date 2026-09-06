@@ -70,11 +70,11 @@ def persist_ai_analysis(
         explanation = explain_single_record(record, limit=5)
 
     try:
-        # 1. Rotate is_current flag for all previous analysis results for this parcel
+        # 1. Rotate is_current flag for all previous analysis results for this parcel with row-level lock
         db.query(AIAnalysisResult).filter(
             AIAnalysisResult.parcel_id == parcel.id,
             AIAnalysisResult.is_current.is_(True),
-        ).update({"is_current": False}, synchronize_session="fetch")
+        ).with_for_update().update({"is_current": False}, synchronize_session="fetch")
 
         # 2. Create new AIAnalysisResult record
         ai_result = AIAnalysisResult(

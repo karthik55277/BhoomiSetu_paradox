@@ -24,11 +24,32 @@ from app.services.ml_service import build_record, explain_single_record, get_mod
 BASE_DIR = Path(__file__).resolve().parents[2]
 MODEL_PATH = BASE_DIR / "ml" / "models" / "acquisition_risk_model.pkl"
 
+import logging
+import sys
+
+from app.middleware import (
+    RateLimitingMiddleware,
+    RequestCorrelationMiddleware,
+    SecurityHeadersMiddleware,
+)
+
+# Configure stdout structured logging for Docker container observability
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] [req:%(request_id)s] %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+
 app = FastAPI(
     title="BhoomiSetu API",
     description="Real-Time National Land Acquisition & Management System API with ML Risk Scoring & PostGIS GIS Support",
-    version="0.2.4",
+    version="0.2.5",
 )
+
+# Register security, correlation, and rate-limiting middleware
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestCorrelationMiddleware)
+app.add_middleware(RateLimitingMiddleware)
 
 # Allow local frontend dev server to call API
 app.add_middleware(

@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Activity, AlertTriangle, ArrowLeft, ArrowRight, Bell, Check, CheckCircle2, ChevronDown, CircleHelp, Download, FileText, Layers, Landmark, LayoutDashboard, Map, Menu, RefreshCw, Search, Settings, ShieldCheck, Smartphone, Sparkles, Upload } from 'lucide-react'
 import { FieldApp } from './components/FieldApp'
+import { DemoStoryModal } from './components/DemoStoryModal'
 import {
   buildParcelRiskInput,
   deleteDocumentFile,
@@ -132,6 +133,7 @@ function App() {
   // Authentication & Session State
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => getStoredUser())
   const [showUserModal, setShowUserModal] = useState(false)
+  const [isDemoModalOpen, setIsDemoModalOpen] = useState(false)
   const [wsStatus, setWsStatus] = useState<ConnectionStatus>('OFFLINE')
 
   const notify = (message: string) => {
@@ -437,6 +439,14 @@ function App() {
               <span>{currentUser ? `${currentUser.role_name}` : 'Seeded data'}</span>
             </div>
             <Button
+              className="primary-button"
+              onClick={() => setIsDemoModalOpen(true)}
+              style={{ gap: '6px', backgroundColor: '#0284c7', padding: '6px 12px', fontSize: '12px' }}
+              title="Interactive Hackathon Presentation Script & Demo Data Reset"
+            >
+              <Sparkles size={14} /> 🎬 Hackathon Demo
+            </Button>
+            <Button
               className="icon-button"
               onClick={() => {
                 setUnread(0)
@@ -528,6 +538,17 @@ function App() {
           />
         </div>
       </main>
+      <DemoStoryModal
+        isOpen={isDemoModalOpen}
+        onClose={() => setIsDemoModalOpen(false)}
+        onSwitchUser={(user) => {
+          setCurrentUser(user)
+          wsService.connect()
+        }}
+        onNavigateTab={(tab) => navigate(tab === 'field' ? '/field' : tab === 'ai' ? '/ai-ranking' : `/${tab}`)}
+        onNotify={notify}
+      />
+
       {toast && (
         <div className="toast">
           <CheckCircle2 size={16} /> {toast}
@@ -2246,7 +2267,7 @@ function DisputesView({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const loadDisputes = async () => {
+  const loadDisputes = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
@@ -2260,11 +2281,11 @@ function DisputesView({
     } finally {
       setLoading(false)
     }
-  }
+  }, [query, filterStatus])
 
   useEffect(() => {
     loadDisputes()
-  }, [query, filterStatus])
+  }, [loadDisputes])
 
   return (
     <>
@@ -2367,7 +2388,7 @@ function DisputeDetail({
   const [error, setError] = useState<string | null>(null)
   const [updating, setUpdating] = useState(false)
 
-  const loadDispute = async () => {
+  const loadDispute = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
@@ -2386,11 +2407,11 @@ function DisputeDetail({
     } finally {
       setLoading(false)
     }
-  }
+  }, [disputeId])
 
   useEffect(() => {
     loadDispute()
-  }, [disputeId])
+  }, [loadDispute])
 
   const handleUpdate = async (payload: { status?: string; priority?: string }) => {
     if (!dispute) return
@@ -2524,7 +2545,7 @@ function CompensationView({ notify }: { notify: (s: string) => void }) {
   const [error, setError] = useState<string | null>(null)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
 
-  const loadCompensations = async () => {
+  const loadCompensations = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
@@ -2538,11 +2559,11 @@ function CompensationView({ notify }: { notify: (s: string) => void }) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [query, statusFilter])
 
   useEffect(() => {
     loadCompensations()
-  }, [query, statusFilter])
+  }, [loadCompensations])
 
   const cycleStatus = async (record: CompensationRecord) => {
     const nextStatus = getNextCompensationStatus(record.status)
@@ -2687,7 +2708,7 @@ function DocumentsView({ notify }: { notify: (s: string) => void }) {
   const [regParcelId, setRegParcelId] = useState('BR-042-0187')
   const [regFile, setRegFile] = useState<File | null>(null)
 
-  const loadDocuments = async () => {
+  const loadDocuments = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
@@ -2701,11 +2722,11 @@ function DocumentsView({ notify }: { notify: (s: string) => void }) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [query, categoryFilter])
 
   useEffect(() => {
     loadDocuments()
-  }, [query, categoryFilter])
+  }, [loadDocuments])
 
   const handleUploadDocument = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -2990,7 +3011,7 @@ function AuditView() {
   const [error, setError] = useState<string | null>(null)
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({})
 
-  const loadAudit = async () => {
+  const loadAudit = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
@@ -3005,11 +3026,11 @@ function AuditView() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [query, actionFilter])
 
   useEffect(() => {
     loadAudit()
-  }, [query, actionFilter])
+  }, [loadAudit])
 
   const togglePayload = (id: string) => {
     setExpandedIds((prev) => ({ ...prev, [id]: !prev[id] }))
@@ -3162,7 +3183,7 @@ function AnalyticsView() {
   const [documentsCount, setDocumentsCount] = useState<number>(0)
   const [chainValid, setChainValid] = useState<boolean | null>(null)
 
-  const loadAnalyticsMetrics = async () => {
+  const loadAnalyticsMetrics = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
@@ -3190,11 +3211,11 @@ function AnalyticsView() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
     loadAnalyticsMetrics()
-  }, [])
+  }, [loadAnalyticsMetrics])
 
   return (
     <>

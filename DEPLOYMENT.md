@@ -104,3 +104,27 @@ docker compose exec api python -m pytest backend/tests/ -v
 > **Enterprise Backup Strategy**:
 > - **Database Backup**: Schedule nightly `pg_dump -U bhoomisetu_user bhoomisetu_db > backup.sql` or use PostgreSQL continuous archiving.
 > - **Object Storage Backup**: Configure MinIO bucket replication (`mc mirror`) or S3 cross-region replication for offsite disaster recovery.
+
+---
+
+## 5. Security & Observability Configuration
+
+### Rate Limiting Architecture Notice
+BhoomiSetu includes built-in sliding-window rate limiting on sensitive routes (`/api/v1/auth/login` max 10 req/min, `/api/v1/documents/upload` max 20 req/min).
+
+> [!NOTE]
+> **Rate Limiting Deployment Note**:
+> The default rate limiter uses an in-memory per-IP sliding window optimal for standalone / single-instance container deployments. In multi-replica API deployments behind a load balancer, configure a centralized Redis storage backend or Nginx `limit_req_zone` rate-limiting module.
+
+### Health Probes & Diagnostics
+- **Liveness Probe**: `GET /api/v1/health/liveness` (Returns `200 OK`)
+- **Readiness Probe**: `GET /api/v1/health/readiness` (Actively tests PostgreSQL `SELECT 1` and MinIO bucket access; returns `200 OK` when healthy, `503 Service Unavailable` when degraded).
+
+### Structured Log Streaming
+Container logs stream structured context with Request Correlation IDs (`X-Request-ID`):
+```bash
+docker compose logs -f api
+```
+Output format:
+`[2026-09-06 13:00:00,000] [INFO] [req:550e8400-e29b-41d4-a716-446655440000] GET /api/v1/health/readiness 200 12.4ms`
+

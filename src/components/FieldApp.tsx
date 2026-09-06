@@ -112,7 +112,7 @@ export const FieldApp: React.FC<FieldAppProps> = ({ currentUser, notify, onDispu
         notify(`Nearby parcels error: ${msg}`)
       })
       .finally(() => setLoadingNearby(false))
-  }, [currentLat, currentLon, effectiveOnline])
+  }, [currentLat, currentLon, effectiveOnline, notify, selectedParcel])
 
   const handleSelectGpsLocation = (idx: number) => {
     setSelectedGpsIdx(idx)
