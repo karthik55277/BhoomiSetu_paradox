@@ -1,0 +1,118 @@
+version: "3.8"
+
+services:
+  # 1. PostgreSQL 16 + PostGIS 3.4 Spatial Database
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: bhoomisetu_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-bhoomisetu_db}
+      POSTGRES_USER: ${POSTGRES_USER:-bhoomisetu_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bhoomisetu_pass}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bhoomisetu_user} -d ${POSTGRES_DB:-bhoomisetu_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. MinIO Object Storage (S3-Compatible Document Storage)
+  minio:
+    image: minio/minio:RELEASE.2024-03-03T17-50-39Z
+    container_name: bhoomisetu_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 3. MinIO Bucket Initialization Helper
+  mc:
+    image: minio/mc:RELEASE.2024-03-03T16-56-17Z
+    container_name: bhoomisetu_mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set myminio http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin};
+      /usr/bin/mc mb --ignore-existing myminio/${MINIO_BUCKET:-bhoomisetu-documents};
+      /usr/bin/mc anonymous set download myminio/${MINIO_BUCKET:-bhoomisetu-documents};
+      exit 0;
+      "
+
+  # 4. FastAPI Backend Application Container
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: bhoomisetu_api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-bhoomisetu_user}:${POSTGRES_PASSWORD:-bhoomisetu_pass}@db:5432/${POSTGRES_DB:-bhoomisetu_db}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-bhoomisetu_super_secret_jwt_key_2026_prod}
+      STORAGE_TYPE: ${STORAGE_TYPE:-minio}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-bhoomisetu-documents}
+      MINIO_SECURE: "false"
+    ports:
+      - "8000:8000"
+    volumes:
+      - upload_data:/app/backend/storage/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  # 5. One-Shot Database Seeder Service
+  seed:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: bhoomisetu_seed
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-bhoomisetu_user}:${POSTGRES_PASSWORD:-bhoomisetu_pass}@db:5432/${POSTGRES_DB:-bhoomisetu_db}
+    entrypoint: >
+      /bin/sh -c "
+      echo 'Running database seeder...';
+      python -m app.seeds.seed_data;
+      echo 'Database seeding finished.';
+      "
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # 6. React Production Web Server + Nginx Reverse Proxy
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bhoomisetu_web
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  minio_data:
+  upload_data:
