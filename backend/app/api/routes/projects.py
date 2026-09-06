@@ -6,9 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_current_user
 from app.db.session import get_db
 from app.models.parcels import Parcel
 from app.models.projects import Project
+from app.models.users import User
 from app.schemas_v1 import ProjectDetailResponse, ProjectResponse
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -19,6 +21,7 @@ def get_projects(
     district: Optional[str] = Query(None, description="Filter projects by district"),
     status_filter: Optional[str] = Query(None, alias="status", description="Filter projects by status"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> List[ProjectResponse]:
     """Retrieve all infrastructure acquisition projects with parcel counts."""
     query = db.query(Project)
@@ -44,6 +47,7 @@ def get_projects(
 def get_project_by_code(
     code: str,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ProjectDetailResponse:
     """Retrieve detailed project information, parcel count, and parcel summaries by project code."""
     project = db.query(Project).filter(func.lower(Project.code) == code.lower()).first()

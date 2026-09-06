@@ -8,10 +8,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_current_user, require_role
 from app.db.session import get_db
 from app.models.compensation import CompensationRecord
 from app.models.parcels import Parcel
 from app.models.projects import Project
+from app.models.users import User
 from app.schemas_v1 import CompensationResponse, CompensationUpdate, PaginatedResponse
 from app.services.audit_service import create_audit_event
 
@@ -29,6 +31,7 @@ def get_compensations(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> PaginatedResponse[CompensationResponse]:
     """Retrieve paginated financial compensation records with filters."""
     query = (
@@ -79,6 +82,7 @@ def update_compensation(
     id: uuid.UUID,
     payload: CompensationUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["district_officer", "acquisition_officer", "system_admin"])),
 ) -> CompensationResponse:
     """Update compensation disbursement record status (Pending approval -> Processing -> Ready -> Released). Creates audit event."""
     comp = db.query(CompensationRecord).filter(CompensationRecord.id == id).first()
@@ -121,6 +125,8 @@ def update_compensation(
 
     # Automatically trigger AuditEvent
     if changes:
+        role_name = current_user.role.name if current_user.role else "officer"
+        actor_name = f"{current_user.full_name} ({role_name})"
         create_audit_event(
             db=db,
             title=f"Compensation {comp.record_code} status updated to {comp.status}",
@@ -132,7 +138,8 @@ def update_compensation(
                 "amount_inr": float(comp.amount_inr),
                 "changes": changes,
             },
-            actor_name="Finance Desk",
+            actor_name=actor_name,
+            actor_user_id=current_user.id,
             entity_id=comp.id,
             parcel_id=comp.parcel_id,
             project_id=comp.project_id,

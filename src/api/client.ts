@@ -19,15 +19,23 @@ export class ApiError extends Error {
 
 export async function requestJson<T>(path: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE_URL}${path}`
-  const headers = {
+  const token = localStorage.getItem('bhoomisetu_token')
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...(options.headers || {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...((options.headers as Record<string, string>) || {}),
   }
 
   try {
     const response = await fetch(url, { ...options, headers })
 
     if (!response.ok) {
+      if (response.status === 401) {
+        localStorage.removeItem('bhoomisetu_token')
+        localStorage.removeItem('bhoomisetu_user')
+        window.dispatchEvent(new Event('bhoomisetu_auth_401'))
+      }
+
       let detailMessage = `HTTP error ${response.status}`
       try {
         const errorData = (await response.json()) as { detail?: string }
@@ -49,3 +57,4 @@ export async function requestJson<T>(path: string, options: RequestInit = {}): P
     throw new ApiError(message, 0, message)
   }
 }
+

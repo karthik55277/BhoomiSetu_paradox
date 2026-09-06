@@ -57,6 +57,7 @@ def persist_ai_analysis(
     record: Dict[str, Any],
     prediction: Dict[str, Any],
     explanation: Optional[Dict[str, Any]] = None,
+    current_user: Optional[Any] = None,
 ) -> AIAnalysisResult:
     """Persist prediction + SHAP explanation for a parcel transactionally.
     
@@ -92,7 +93,7 @@ def persist_ai_analysis(
         db.add(ai_result)
         db.flush()
 
-        # 3. Create compact AI_EVALUATION audit event
+        # 3. Create compact AI_EVALUATION audit event with authenticated user identity
         audit_payload = {
             "parcel_id": parcel.parcel_id,
             "analysis_id": str(ai_result.id),
@@ -101,13 +102,21 @@ def persist_ai_analysis(
             "risk_score": prediction["risk_score"],
         }
 
+        actor_name = "AI Engine Service"
+        actor_user_id = None
+        if current_user:
+            role_name = getattr(current_user, "role_name", current_user.role.name if getattr(current_user, "role", None) else "officer")
+            actor_name = f"{getattr(current_user, 'full_name', 'System User')} ({role_name})"
+            actor_user_id = getattr(current_user, "id", None)
+
         create_audit_event(
             db=db,
             title=f"AI Risk Evaluation recorded for parcel {parcel.parcel_id}",
             entity_table="ai_analysis_results",
             action_type="AI_EVALUATION",
             payload=audit_payload,
-            actor_name="AI Engine Service",
+            actor_name=actor_name,
+            actor_user_id=actor_user_id,
             entity_id=ai_result.id,
             parcel_id=parcel.id,
             project_id=parcel.project_id,

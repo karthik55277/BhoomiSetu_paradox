@@ -71,8 +71,15 @@ def health() -> Dict[str, Any]:
     }
 
 
+from app.api.deps import require_role
+from app.models.users import User
+
 @app.post("/api/v1/ai/risk/predict", response_model=RiskPredictionResponse, tags=["ai"])
-def predict_risk(payload: LandRiskInput, db: Session = Depends(get_db)) -> dict[str, object]:
+def predict_risk(
+    payload: LandRiskInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["district_officer", "acquisition_officer", "legal_officer", "system_admin"])),
+) -> dict[str, object]:
     """Run the trained model pipeline, return prediction metadata, and persist to DB if parcel_id is provided."""
     try:
         record = build_record(payload.model_dump())
@@ -80,7 +87,7 @@ def predict_risk(payload: LandRiskInput, db: Session = Depends(get_db)) -> dict[
 
         if payload.parcel_id:
             parcel = resolve_parcel(db, payload.parcel_id)
-            ai_result = persist_ai_analysis(db, parcel, record, result)
+            ai_result = persist_ai_analysis(db, parcel, record, result, current_user=current_user)
             result["analysis_id"] = str(ai_result.id)
             result["model_version"] = ai_result.model_version
             result["persisted_at"] = ai_result.created_at.isoformat() if ai_result.created_at else None
@@ -104,7 +111,12 @@ def predict_risk(payload: LandRiskInput, db: Session = Depends(get_db)) -> dict[
 
 
 @app.post("/api/v1/ai/risk/explain", response_model=RiskExplanationResponse, tags=["ai"])
-def explain_risk(payload: LandRiskInput, limit: int = 5, db: Session = Depends(get_db)) -> dict[str, object]:
+def explain_risk(
+    payload: LandRiskInput,
+    limit: int = 5,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["district_officer", "acquisition_officer", "legal_officer", "system_admin"])),
+) -> dict[str, object]:
     """Run the trained model, generate SHAP explanation, and persist to DB if parcel_id is provided."""
     try:
         record = build_record(payload.model_dump())
@@ -112,7 +124,7 @@ def explain_risk(payload: LandRiskInput, limit: int = 5, db: Session = Depends(g
 
         if payload.parcel_id:
             parcel = resolve_parcel(db, payload.parcel_id)
-            ai_result = persist_ai_analysis(db, parcel, record, result, explanation=result)
+            ai_result = persist_ai_analysis(db, parcel, record, result, explanation=result, current_user=current_user)
             result["analysis_id"] = str(ai_result.id)
             result["model_version"] = ai_result.model_version
             result["persisted_at"] = ai_result.created_at.isoformat() if ai_result.created_at else None

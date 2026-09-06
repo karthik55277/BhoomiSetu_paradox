@@ -8,6 +8,7 @@ from geoalchemy2.shape import to_shape
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_current_user
 from app.db.session import get_db
 from app.models.ai_analysis import AIAnalysisResult
 from app.models.compensation import CompensationRecord
@@ -15,6 +16,7 @@ from app.models.disputes import Dispute
 from app.models.documents import DocumentRecord
 from app.models.parcels import Parcel, ParcelGeometry, ParcelOwner
 from app.models.projects import Project
+from app.models.users import User
 from app.schemas_v1 import (
     AIAnalysisResponse,
     CompensationResponse,
@@ -42,6 +44,7 @@ def get_parcels(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> PaginatedResponse[ParcelResponse]:
     """Retrieve paginated land parcels with search and filters."""
     query = db.query(Parcel).join(Project, Parcel.project_id == Project.id)
@@ -97,6 +100,7 @@ def get_parcels(
 def get_parcel_detail(
     parcel_id_or_code: str,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ParcelDetailResponse:
     """Retrieve complete parcel profile with project, ownership, 19 ML features, disputes, compensation, and geometry summary."""
     query = db.query(Parcel).filter(
@@ -223,6 +227,7 @@ def get_parcel_detail(
 def get_parcel_ai_history(
     parcel_id_or_code: str,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> List[AIAnalysisResponse]:
     """Retrieve chronological AI analysis history for a land parcel ordered newest first."""
     query = db.query(Parcel).filter(

@@ -6,16 +6,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_current_user, require_role
 from app.db.session import get_db
 from app.models.documents import DocumentRecord
 from app.models.parcels import Parcel
 from app.models.projects import Project
+from app.models.users import User
 from app.schemas_v1 import DocumentCreate, DocumentResponse, PaginatedResponse
 
 from app.services.audit_service import create_audit_event
 
 router = APIRouter(prefix="/documents", tags=["documents"])
-
 
 
 @router.get("", response_model=PaginatedResponse[DocumentResponse])
@@ -28,6 +29,7 @@ def get_documents(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> PaginatedResponse[DocumentResponse]:
     """Retrieve paginated land acquisition document metadata with search and filters."""
     query = (
@@ -80,6 +82,7 @@ def get_documents(
 def create_document_metadata(
     payload: DocumentCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["district_officer", "acquisition_officer", "legal_officer", "system_admin"])),
 ) -> DocumentResponse:
     """Create document metadata record (Phase 2.3 metadata only, no physical file storage)."""
     # Verify project exists
@@ -117,10 +120,13 @@ def create_document_metadata(
         file_size_bytes=payload.file_size_bytes,
         mime_type=payload.mime_type,
         verification_status=payload.verification_status,
+        uploaded_by_user_id=current_user.id,
     )
     db.add(doc)
     db.flush()
 
+    role_name = current_user.role.name if current_user.role else "officer"
+    actor_name = f"{current_user.full_name} ({role_name})"
     create_audit_event(
         db=db,
         title=f"Document record {doc.document_code} registered",
@@ -133,8 +139,10 @@ def create_document_metadata(
             "verification_status": doc.verification_status,
             "file_size_bytes": doc.file_size_bytes,
             "storage_path": doc.storage_path,
+            "project_code": project.code,
         },
-        actor_name="Document Registrar",
+        actor_name=actor_name,
+        actor_user_id=current_user.id,
         entity_id=doc.id,
         parcel_id=doc.parcel_id,
         project_id=doc.project_id,

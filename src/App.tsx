@@ -31,8 +31,10 @@ import {
   type ParcelAnalysisCache,
   type RiskPredictionResponse,
 } from './api'
+import { getStoredUser, getCurrentUserApi, loginApi, logoutApi, SEEDED_ACCOUNTS, type UserProfile } from './api/auth'
 import { getRiskLabel, initialAuditEvents, initialDisputes, initialDocuments, parcels, projects, stages, type AuditEvent, type CompensationRecord, type DisputeRecord, type DocumentRecord, type Parcel } from './data'
 import './App.css'
+
 
 
 type Icon = typeof LayoutDashboard
@@ -118,9 +120,58 @@ function App() {
     highRiskOverlay: true,
   })
 
+  // Authentication & Session State
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => getStoredUser())
+  const [showUserModal, setShowUserModal] = useState(false)
+
   const notify = (message: string) => {
     setToast(message)
     window.setTimeout(() => setToast(''), 2800)
+  }
+
+  useEffect(() => {
+    const token = localStorage.getItem('bhoomisetu_token')
+    if (token) {
+      getCurrentUserApi()
+        .then((user) => {
+          setCurrentUser(user)
+          localStorage.setItem('bhoomisetu_user', JSON.stringify(user))
+        })
+        .catch(() => {
+          loginApi({ email: 'anil.kumar@bhoomisetu.gov.in' })
+            .then((res) => setCurrentUser(res.user))
+            .catch(() => {})
+        })
+    } else {
+      loginApi({ email: 'anil.kumar@bhoomisetu.gov.in' })
+        .then((res) => setCurrentUser(res.user))
+        .catch(() => {})
+    }
+
+    const handleAuth401 = () => {
+      setCurrentUser(null)
+      notify('Session expired or unauthorized. Please log in.')
+      setShowUserModal(true)
+    }
+
+    window.addEventListener('bhoomisetu_auth_401', handleAuth401)
+    return () => window.removeEventListener('bhoomisetu_auth_401', handleAuth401)
+  }, [])
+
+  const handleSwitchAccount = async (email: string) => {
+    try {
+      const res = await loginApi({ email })
+      setCurrentUser(res.user)
+      setShowUserModal(false)
+      setMenuOpen(false)
+      notify(`Authenticated as ${res.user.full_name} (${res.user.role_name})`)
+      fetchDisputes().then((r) => setDisputes(r.items.map(mapApiDisputeToUi))).catch(() => {})
+      fetchDocuments().then((r) => setDocuments(r.items.map(mapApiDocumentToUi))).catch(() => {})
+      fetchAuditEvents().then((r) => setAuditEvents(r.items.map(mapApiAuditEventToUi))).catch(() => {})
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Login failed'
+      notify(`Authentication failed: ${msg}`)
+    }
   }
 
   useEffect(() => {
@@ -136,6 +187,7 @@ function App() {
       .then((res) => setAuditEvents(res.items.map(mapApiAuditEventToUi)))
       .catch(() => {})
   }, [])
+
 
   // Central AI Fetcher with Shared Cache
   const getOrFetchParcelAnalysis = async (parcel: Parcel, forceRefresh = false): Promise<ParcelAnalysis> => {
@@ -270,11 +322,13 @@ function App() {
             <CircleHelp size={16} />
             <span>Help center</span>
           </Button>
-          <div className="user-mini">
-            <div className="avatar">AK</div>
+          <div className="user-mini" onClick={() => setShowUserModal(true)} style={{ cursor: 'pointer' }} title="Click to switch account">
+            <div className="avatar">
+              {currentUser ? currentUser.full_name.split(' ').map((n) => n[0]).join('') : 'AK'}
+            </div>
             <div>
-              <strong>Anil Kumar</strong>
-              <small>District Officer</small>
+              <strong>{currentUser?.full_name || 'Anil Kumar'}</strong>
+              <small>{currentUser ? currentUser.role_name.replace('_', ' ').toUpperCase() : 'District Officer'}</small>
             </div>
           </div>
         </div>
@@ -303,7 +357,7 @@ function App() {
           </div>
           <div className="top-actions">
             <div className="demo-badge">
-              <span></span> Seeded demo data
+              <span></span> {currentUser ? `JWT Auth: ${currentUser.role_name}` : 'Seeded demo data'}
             </div>
             <Button
               className="icon-button"
@@ -317,17 +371,27 @@ function App() {
               {unread > 0 && <i>{unread}</i>}
             </Button>
             <Button className="profile-button" onClick={() => setMenuOpen(!menuOpen)}>
-              <div className="avatar">AK</div>
+              <div className="avatar">
+                {currentUser ? currentUser.full_name.split(' ').map((n) => n[0]).join('') : 'AK'}
+              </div>
               <ChevronDown size={14} />
             </Button>
           </div>
           {menuOpen && (
             <div className="profile-menu">
-              <strong>Anil Kumar</strong>
-              <small>District Officer · Patna</small>
+              <strong>{currentUser?.full_name || 'Anil Kumar'}</strong>
+              <small>{currentUser ? `${currentUser.role_name} · ${currentUser.jurisdiction || 'Patna'}` : 'District Officer · Patna'}</small>
               <Button
                 onClick={() => {
-                  notify('Profile view: District Officer · Patna Zone')
+                  setShowUserModal(true)
+                  setMenuOpen(false)
+                }}
+              >
+                Switch Role / Login
+              </Button>
+              <Button
+                onClick={() => {
+                  notify(`Profile: ${currentUser?.full_name} (${currentUser?.role_name})`)
                   setMenuOpen(false)
                 }}
               >
@@ -351,8 +415,11 @@ function App() {
               </Button>
               <Button
                 onClick={() => {
-                  notify('Signed out of demo session')
+                  logoutApi()
+                  setCurrentUser(null)
                   setMenuOpen(false)
+                  notify('Logged out of BhoomiSetu')
+                  setShowUserModal(true)
                 }}
               >
                 Sign out
@@ -360,6 +427,7 @@ function App() {
             </div>
           )}
         </header>
+
 
         <div className="content-wrap">
           <Page
@@ -387,9 +455,63 @@ function App() {
           <CheckCircle2 size={16} /> {toast}
         </div>
       )}
+
+      {showUserModal && (
+        <div className="modal-backdrop" onClick={() => setShowUserModal(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px', padding: '24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>Authenticating User Account</h3>
+              <Button className="icon-button" onClick={() => setShowUserModal(false)}>✕</Button>
+            </div>
+            <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '20px' }}>
+              Select a seeded government role account to authenticate via FastAPI JWT token:
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {SEEDED_ACCOUNTS.map((acc) => {
+                const isCurrent = currentUser?.email === acc.email
+                return (
+                  <button
+                    key={acc.email}
+                    type="button"
+                    onClick={() => handleSwitchAccount(acc.email)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '12px 16px',
+                      borderRadius: '8px',
+                      border: isCurrent ? '1px solid var(--primary)' : '1px solid var(--border)',
+                      background: isCurrent ? 'rgba(59, 130, 246, 0.08)' : 'var(--bg-card)',
+                      color: 'var(--text-main)',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: '14px' }}>{acc.name}</div>
+                      <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{acc.email}</div>
+                    </div>
+                    <span style={{
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      padding: '3px 8px',
+                      borderRadius: '4px',
+                      background: isCurrent ? 'var(--primary)' : 'var(--bg-tag)',
+                      color: isCurrent ? '#fff' : 'var(--text-muted)'
+                    }}>
+                      {acc.roleLabel}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+
 
 function Page({
   route,

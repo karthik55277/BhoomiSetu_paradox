@@ -8,10 +8,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_current_user, require_role
 from app.db.session import get_db
 from app.models.disputes import Dispute
 from app.models.parcels import Parcel
 from app.models.projects import Project
+from app.models.users import User
 from app.schemas_v1 import DisputeResponse, DisputeUpdate, PaginatedResponse
 from app.services.audit_service import create_audit_event
 
@@ -29,6 +31,7 @@ def get_disputes(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> PaginatedResponse[DisputeResponse]:
     """Retrieve paginated legal disputes and land objections with filters."""
     query = (
@@ -86,6 +89,7 @@ def update_dispute(
     id: uuid.UUID,
     payload: DisputeUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["district_officer", "legal_officer", "system_admin"])),
 ) -> DisputeResponse:
     """Update dispute status or priority safely. Automatically records a cryptographic audit event."""
     dispute = db.query(Dispute).filter(Dispute.id == id).first()
@@ -123,7 +127,8 @@ def update_dispute(
 
     # Automatically trigger cryptographic AuditEvent if changes occurred
     if changes:
-        actor_name = dispute.assigned_officer_name or "Legal Officer"
+        role_name = current_user.role.name if current_user.role else "officer"
+        actor_name = f"{current_user.full_name} ({role_name})"
         create_audit_event(
             db=db,
             title=f"Dispute {dispute.dispute_code} updated to {dispute.status}",
@@ -135,6 +140,7 @@ def update_dispute(
                 "changes": changes,
             },
             actor_name=actor_name,
+            actor_user_id=current_user.id,
             entity_id=dispute.id,
             parcel_id=dispute.parcel_id,
             project_id=dispute.project_id,

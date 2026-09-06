@@ -8,10 +8,12 @@ from geoalchemy2 import functions as geofunc
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_current_user
 from app.db.session import get_db
 from app.models.ai_analysis import AIAnalysisResult
 from app.models.parcels import Parcel, ParcelGeometry
 from app.models.projects import Project
+from app.models.users import User
 from app.schemas_v1 import GeoJSONFeature, GeoJSONFeatureCollection
 
 router = APIRouter(prefix="/gis", tags=["gis"])
@@ -26,6 +28,7 @@ def get_gis_parcels(
     risk_level: Optional[str] = Query(None, description="Filter by AI risk level (if available)"),
     limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> GeoJSONFeatureCollection:
     """
     Retrieve spatial cadastral parcels as a GeoJSON FeatureCollection using PostGIS spatial indexing.
