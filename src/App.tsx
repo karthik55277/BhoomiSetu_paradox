@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Activity, AlertTriangle, ArrowLeft, ArrowRight, Bell, Check, CheckCircle2, ChevronDown, CircleHelp, Download, FileText, Layers, Landmark, LayoutDashboard, Map, Menu, RefreshCw, Search, Settings, ShieldCheck, Smartphone, Sparkles, Upload } from 'lucide-react'
 import { FieldApp } from './components/FieldApp'
 import { DemoStoryModal } from './components/DemoStoryModal'
@@ -137,6 +137,7 @@ function App() {
   const [wsStatus, setWsStatus] = useState<ConnectionStatus>('OFFLINE')
   const [switchingEmail, setSwitchingEmail] = useState<string | null>(null)
   const [switchError, setSwitchError] = useState<string | null>(null)
+  const isAutoHealingRef = useRef(false)
 
   const notify = (message: string) => {
     setToast(message)
@@ -223,26 +224,29 @@ function App() {
       fetchAuditEvents().then((res) => setAuditEvents(res.items.map(mapApiAuditEventToUi))).catch(() => {})
     })
 
-    const handleAuth401 = () => {
-      const storedUser = getStoredUser()
-      const emailToUse = storedUser?.email || currentUser?.email || 'anil.kumar@bhoomisetu.gov.in'
-      loginApi({ email: emailToUse, password: 'bhoomisetu123' })
-        .then((res) => {
-          setCurrentUser(res.user)
-          wsService.connect()
-          fetchDisputes().then((r) => setDisputes(r.items.map(mapApiDisputeToUi))).catch(() => {})
-          fetchDocuments().then((r) => setDocuments(r.items.map(mapApiDocumentToUi))).catch(() => {})
-          fetchAuditEvents().then((r) => setAuditEvents(r.items.map(mapApiAuditEventToUi))).catch(() => {})
-        })
-        .catch(() => {
-          setCurrentUser(null)
-          wsService.disconnect()
-        })
+    const handleAuth401 = async () => {
+      if (isAutoHealingRef.current) return
+      isAutoHealingRef.current = true
+      try {
+        const storedUser = getStoredUser()
+        const emailToUse = storedUser?.email || 'anil.kumar@bhoomisetu.gov.in'
+        const res = await loginApi({ email: emailToUse, password: 'bhoomisetu123' })
+        setCurrentUser(res.user)
+        wsService.connect()
+        fetchDisputes().then((r) => setDisputes(r.items.map(mapApiDisputeToUi))).catch(() => {})
+        fetchDocuments().then((r) => setDocuments(r.items.map(mapApiDocumentToUi))).catch(() => {})
+        fetchAuditEvents().then((r) => setAuditEvents(r.items.map(mapApiAuditEventToUi))).catch(() => {})
+      } catch {
+        setCurrentUser(null)
+        wsService.disconnect()
+      } finally {
+        isAutoHealingRef.current = false
+      }
     }
 
     window.addEventListener('bhoomisetu_auth_401', handleAuth401)
     return () => window.removeEventListener('bhoomisetu_auth_401', handleAuth401)
-  }, [currentUser?.email, initAppAuth])
+  }, [initAppAuth])
 
   const handleSwitchAccount = async (email: string) => {
     if (switchingEmail !== null) return

@@ -56,8 +56,8 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         # Route specific limits: (max_requests, window_seconds)
         self.route_limits = {
-            "/api/v1/auth/login": (10, 60),
-            "/api/v1/documents/upload": (20, 60),
+            "/api/v1/auth/login": (60, 60),
+            "/api/v1/documents/upload": (30, 60),
         }
 
     @classmethod
