@@ -89,14 +89,25 @@ def upload_document_file(
     project_id: uuid.UUID = Form(...),
     category: str = Form(...),
     parcel_id: Optional[uuid.UUID] = Form(None),
+    client_document_id: Optional[uuid.UUID] = Form(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["district_officer", "acquisition_officer", "legal_officer", "system_admin"])),
+    current_user: User = Depends(require_role(["district_officer", "acquisition_officer", "field_surveyor", "legal_officer", "system_admin"])),
 ) -> DocumentResponse:
     """
     Multipart file upload endpoint.
+    Supports optional client_document_id for upload idempotency across retries.
     Saves file to Object Storage Engine (MinIO/Local), validates magic bytes & size, records DB metadata,
     and logs DOCUMENT_UPLOAD audit event. Includes transactional compensation rollback on failure.
     """
+    # 0. Check upload idempotency via client_document_id
+    if client_document_id:
+        existing_doc = db.query(DocumentRecord).filter(DocumentRecord.client_document_id == client_document_id).first()
+        if existing_doc:
+            res = DocumentResponse.model_validate(existing_doc)
+            res.parcel_id_str = existing_doc.parcel.parcel_id if existing_doc.parcel else None
+            res.project_code = existing_doc.project.code if existing_doc.project else None
+            return res
+
     # 1. Validate project exists
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
@@ -137,6 +148,7 @@ def upload_document_file(
     # 4. Insert DocumentRecord into DB + AuditEvent with Transactional Compensation Rollback
     doc_code = f"DOC-{uuid.uuid4().hex[:8].upper()}"
     doc = DocumentRecord(
+        client_document_id=client_document_id,
         document_code=doc_code,
         title=title,
         parcel_id=parcel_id,

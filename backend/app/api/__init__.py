@@ -8,6 +8,7 @@ from app.api.routes.compensation import router as compensation_router
 from app.api.routes.disputes import router as disputes_router
 from app.api.routes.documents import router as documents_router
 from app.api.routes.gis import router as gis_router
+from app.api.routes.inspections import router as inspections_router
 from app.api.routes.owners import router as owners_router
 from app.api.routes.parcels import router as parcels_router
 from app.api.routes.projects import router as projects_router
@@ -23,6 +24,7 @@ api_v1_router.include_router(owners_router)
 api_v1_router.include_router(disputes_router)
 api_v1_router.include_router(compensation_router)
 api_v1_router.include_router(documents_router)
+api_v1_router.include_router(inspections_router)
 api_v1_router.include_router(audit_router)
 api_v1_router.include_router(websocket_router)
 

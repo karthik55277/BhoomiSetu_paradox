@@ -30,6 +30,7 @@ export interface LoginPayload {
 
 export const SEEDED_ACCOUNTS = [
   { email: 'anil.kumar@bhoomisetu.gov.in', name: 'Anil Kumar', role: 'district_officer', roleLabel: 'District Officer' },
+  { email: 'ramesh.verma@bhoomisetu.gov.in', name: 'Ramesh Verma', role: 'field_surveyor', roleLabel: 'Field Surveyor' },
   { email: 'priya.sharma@bhoomisetu.gov.in', name: 'Priya Sharma', role: 'acquisition_officer', roleLabel: 'Acquisition Officer' },
   { email: 'rajesh.verma@bhoomisetu.gov.in', name: 'Rajesh Verma', role: 'legal_officer', roleLabel: 'Legal Officer' },
   { email: 'sunita.rao@bhoomisetu.gov.in', name: 'Sunita Rao', role: 'auditor', roleLabel: 'Auditor' },

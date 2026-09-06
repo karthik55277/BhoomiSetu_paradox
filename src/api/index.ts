@@ -12,5 +12,7 @@ export * from './compensation'
 export * from './documents'
 export * from './audit'
 export * from './websocket'
+export * from './indexedDB'
+export * from './inspections'
 
 

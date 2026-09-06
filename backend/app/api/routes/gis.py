@@ -117,3 +117,99 @@ def get_gis_parcels(
         type="FeatureCollection",
         features=features,
     )
+
+
+@router.get("/parcels/nearby", response_model=GeoJSONFeatureCollection)
+def get_nearby_parcels(
+    lat: float = Query(..., ge=-90.0, le=90.0, description="Surveyor latitude"),
+    lon: float = Query(..., ge=-180.0, le=180.0, description="Surveyor longitude"),
+    radius_km: float = Query(5.0, description="Radius in km (0 < radius_km <= 25)"),
+    limit: int = Query(20, description="Max parcel results (1 <= limit <= 100)"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> GeoJSONFeatureCollection:
+    """
+    Retrieve spatial parcels near user/device GPS location sorted by distance (m).
+    Enforces strict input bounds: radius_km ∈ (0, 25], limit ∈ [1, 100].
+    Applies user district jurisdiction filtering.
+    """
+    if radius_km <= 0 or radius_km > 25.0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid radius_km '{radius_km}'. Must be between 0.1 and 25.0 km.",
+        )
+
+    if limit < 1 or limit > 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid limit '{limit}'. Must be between 1 and 100.",
+        )
+
+    user_point = geofunc.ST_SetSRID(geofunc.ST_Point(lon, lat), 4326)
+    radius_meters = radius_km * 1000.0
+
+    # Query parcels within radius
+    dist_expr = geofunc.ST_Distance(
+        geofunc.ST_Transform(ParcelGeometry.centroid, 3857),
+        geofunc.ST_Transform(user_point, 3857),
+    ).label("distance_m")
+
+    query = (
+        db.query(
+            Parcel,
+            ParcelGeometry,
+            geofunc.ST_AsGeoJSON(ParcelGeometry.boundary).label("geojson"),
+            AIAnalysisResult,
+            dist_expr,
+        )
+        .join(ParcelGeometry, Parcel.id == ParcelGeometry.parcel_id)
+        .join(Project, Parcel.project_id == Project.id)
+        .outerjoin(AIAnalysisResult, Parcel.id == AIAnalysisResult.parcel_id)
+    )
+
+    # 1. Jurisdiction filter policy
+    role_name = current_user.role.name if current_user.role else "viewer"
+    if current_user.district_jurisdiction and current_user.district_jurisdiction.lower() != "all" and role_name not in ["system_admin", "auditor"]:
+        query = query.filter(func.lower(Parcel.district) == current_user.district_jurisdiction.lower())
+
+    # 2. Distance filter (within radius_meters)
+    query = query.filter(dist_expr <= radius_meters)
+
+    results = query.order_by(dist_expr.asc()).limit(limit).all()
+
+    features: List[GeoJSONFeature] = []
+    for parcel, geom, geojson_str, ai_res, dist_m in results:
+        geom_dict = json.loads(geojson_str) if geojson_str else {}
+        risk_lvl = ai_res.risk_level if ai_res else None
+        risk_scr = float(ai_res.risk_score) if ai_res else float(parcel.baseline_risk_score)
+
+        properties = {
+            "id": str(parcel.id),
+            "parcel_id": parcel.parcel_id,
+            "survey_number": parcel.survey_number,
+            "district": parcel.district,
+            "project": parcel.project.code if parcel.project else None,
+            "acquisition_status": parcel.acquisition_status,
+            "land_area_ha": float(parcel.land_area_ha),
+            "land_type": parcel.land_type,
+            "land_use": parcel.land_use,
+            "baseline_risk_score": float(parcel.baseline_risk_score),
+            "risk_level": risk_lvl,
+            "risk_score": risk_scr,
+            "distance_m": round(float(dist_m), 1),
+            "ui_x": float(geom.map_ui_x) if geom and geom.map_ui_x is not None else None,
+            "ui_y": float(geom.map_ui_y) if geom and geom.map_ui_y is not None else None,
+        }
+
+        features.append(
+            GeoJSONFeature(
+                type="Feature",
+                geometry=geom_dict,
+                properties=properties,
+            )
+        )
+
+    return GeoJSONFeatureCollection(
+        type="FeatureCollection",
+        features=features,
+    )

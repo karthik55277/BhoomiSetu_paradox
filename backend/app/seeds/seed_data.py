@@ -38,6 +38,7 @@ logger = logging.getLogger("seed_data")
 ROLES_SEED = [
     {"name": "district_officer", "description": "District Revenue / Acquisition Officer"},
     {"name": "acquisition_officer", "description": "Field Land Acquisition Officer"},
+    {"name": "field_surveyor", "description": "Field Surveyor - Ground inspection and photo evidence collection"},
     {"name": "legal_officer", "description": "Legal & Dispute Resolution Officer"},
     {"name": "auditor", "description": "Independent Financial & Process Auditor"},
     {"name": "viewer", "description": "Read-only Public / Stakeholder Viewer"},
@@ -50,6 +51,13 @@ USERS_SEED = [
         "full_name": "Anil Kumar",
         "email": "anil.kumar@bhoomisetu.gov.in",
         "role_name": "district_officer",
+        "district_jurisdiction": "Patna",
+        "hashed_password": "$2b$12$eImiTXuWVxfM37uY4JANjOL.81F8R.S6hB7vU3k9W012345678901",
+    },
+    {
+        "full_name": "Ramesh Verma",
+        "email": "ramesh.verma@bhoomisetu.gov.in",
+        "role_name": "field_surveyor",
         "district_jurisdiction": "Patna",
         "hashed_password": "$2b$12$eImiTXuWVxfM37uY4JANjOL.81F8R.S6hB7vU3k9W012345678901",
     },

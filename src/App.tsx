@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Activity, AlertTriangle, ArrowLeft, ArrowRight, Bell, Check, CheckCircle2, ChevronDown, CircleHelp, Download, FileText, Layers, Landmark, LayoutDashboard, Map, Menu, RefreshCw, Search, Settings, ShieldCheck, Sparkles, Upload } from 'lucide-react'
+import { Activity, AlertTriangle, ArrowLeft, ArrowRight, Bell, Check, CheckCircle2, ChevronDown, CircleHelp, Download, FileText, Layers, Landmark, LayoutDashboard, Map, Menu, RefreshCw, Search, Settings, ShieldCheck, Smartphone, Sparkles, Upload } from 'lucide-react'
+import { FieldApp } from './components/FieldApp'
 import {
   buildParcelRiskInput,
   deleteDocumentFile,
@@ -47,6 +48,7 @@ import './App.css'
 type Icon = typeof LayoutDashboard
 const navItems: [string, string, Icon][] = [
   ['Dashboard', '/dashboard', LayoutDashboard],
+  ['Field App', '/field', Smartphone],
   ['GIS Map', '/gis', Map],
   ['Projects', '/projects', Landmark],
   ['Parcels', '/parcels', FileText],
@@ -159,6 +161,10 @@ function App() {
           break
         case 'DOCUMENT_UPLOAD':
           fetchDocuments().then((res) => setDocuments(res.items.map(mapApiDocumentToUi))).catch(() => {})
+          fetchAuditEvents().then((res) => setAuditEvents(res.items.map(mapApiAuditEventToUi))).catch(() => {})
+          window.dispatchEvent(new CustomEvent('bhoomisetu_realtime_event', { detail: event }))
+          break
+        case 'FIELD_INSPECTION':
           fetchAuditEvents().then((res) => setAuditEvents(res.items.map(mapApiAuditEventToUi))).catch(() => {})
           window.dispatchEvent(new CustomEvent('bhoomisetu_realtime_event', { detail: event }))
           break
@@ -503,6 +509,7 @@ function App() {
         <div className="content-wrap">
           <Page
             route={route}
+            currentUser={currentUser}
             selected={selected}
             setSelected={setSelected}
             openParcel={openParcel}
@@ -586,6 +593,7 @@ function App() {
 
 function Page({
   route,
+  currentUser,
   selected,
   setSelected,
   openParcel,
@@ -603,6 +611,7 @@ function Page({
   setSelectedProjectTab,
 }: {
   route: string
+  currentUser: UserProfile | null
   selected: Parcel
   setSelected: (p: Parcel) => void
   openParcel: (p: Parcel) => void
@@ -619,6 +628,7 @@ function Page({
   selectedProjectTab: Record<string, string>
   setSelectedProjectTab: React.Dispatch<React.SetStateAction<Record<string, string>>>
 }) {
+  if (route === '/field') return <FieldApp currentUser={currentUser} notify={notify} />
   if (route.startsWith('/parcels/')) {
     const parcelId = route.split('/')[2]
     const parcel = parcels.find((p) => p.id === parcelId) || selected

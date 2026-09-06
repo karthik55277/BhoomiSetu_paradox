@@ -285,3 +285,39 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     user: UserResponse
 
+
+# --- FIELD INSPECTIONS ---
+
+class FieldInspectionCreate(BaseModel):
+    client_inspection_id: uuid.UUID
+    parcel_id: uuid.UUID
+    gps_lat: float = Field(..., ge=-90.0, le=90.0)
+    gps_lon: float = Field(..., ge=-180.0, le=180.0)
+    verification_status: str = Field("Boundary Verified", max_length=50)
+    boundary_intact: bool = True
+    encroachment_flag: bool = False
+    notes: Optional[str] = None
+    photo_document_id: Optional[uuid.UUID] = None
+    captured_at: datetime
+
+
+class FieldInspectionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    client_inspection_id: uuid.UUID
+    parcel_id: uuid.UUID
+    inspector_id: uuid.UUID
+    inspector_name: Optional[str] = None
+    gps_lat: float
+    gps_lon: float
+    distance_to_parcel_m: Optional[float] = None
+    verification_status: str
+    boundary_intact: bool
+    encroachment_flag: bool
+    notes: Optional[str] = None
+    photo_document_id: Optional[uuid.UUID] = None
+    status: str
+    captured_at: datetime
+    created_at: datetime
+
