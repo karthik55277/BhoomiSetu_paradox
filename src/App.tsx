@@ -187,42 +187,57 @@ function App() {
     }
   }, [])
 
-  useEffect(() => {
+  const initAppAuth = useCallback(async (): Promise<UserProfile | null> => {
     const token = localStorage.getItem('bhoomisetu_token')
     if (token) {
-      getCurrentUserApi()
-        .then((user) => {
-          setCurrentUser(user)
-          localStorage.setItem('bhoomisetu_user', JSON.stringify(user))
-          wsService.connect()
-        })
-        .catch(() => {
-          loginApi({ email: 'anil.kumar@bhoomisetu.gov.in' })
-            .then((res) => {
-              setCurrentUser(res.user)
-              wsService.connect()
-            })
-            .catch(() => {})
-        })
-    } else {
-      loginApi({ email: 'anil.kumar@bhoomisetu.gov.in' })
+      try {
+        const user = await getCurrentUserApi()
+        setCurrentUser(user)
+        localStorage.setItem('bhoomisetu_user', JSON.stringify(user))
+        wsService.connect()
+        return user
+      } catch {
+        localStorage.removeItem('bhoomisetu_token')
+        localStorage.removeItem('bhoomisetu_user')
+      }
+    }
+
+    try {
+      const res = await loginApi({ email: 'anil.kumar@bhoomisetu.gov.in', password: 'bhoomisetu123' })
+      setCurrentUser(res.user)
+      wsService.connect()
+      return res.user
+    } catch (err) {
+      console.warn('Initial auto-login failed:', err)
+      return null
+    }
+  }, [])
+
+  useEffect(() => {
+    initAppAuth().then(() => {
+      fetchDisputes().then((res) => setDisputes(res.items.map(mapApiDisputeToUi))).catch(() => {})
+      fetchDocuments().then((res) => setDocuments(res.items.map(mapApiDocumentToUi))).catch(() => {})
+      fetchAuditEvents().then((res) => setAuditEvents(res.items.map(mapApiAuditEventToUi))).catch(() => {})
+    })
+
+    const handleAuth401 = () => {
+      loginApi({ email: 'anil.kumar@bhoomisetu.gov.in', password: 'bhoomisetu123' })
         .then((res) => {
           setCurrentUser(res.user)
           wsService.connect()
+          fetchDisputes().then((r) => setDisputes(r.items.map(mapApiDisputeToUi))).catch(() => {})
+          fetchDocuments().then((r) => setDocuments(r.items.map(mapApiDocumentToUi))).catch(() => {})
+          fetchAuditEvents().then((r) => setAuditEvents(r.items.map(mapApiAuditEventToUi))).catch(() => {})
         })
-        .catch(() => {})
-    }
-
-    const handleAuth401 = () => {
-      setCurrentUser(null)
-      wsService.disconnect()
-      notify('Session expired or unauthorized. Please log in.')
-      setShowUserModal(true)
+        .catch(() => {
+          setCurrentUser(null)
+          wsService.disconnect()
+        })
     }
 
     window.addEventListener('bhoomisetu_auth_401', handleAuth401)
     return () => window.removeEventListener('bhoomisetu_auth_401', handleAuth401)
-  }, [])
+  }, [initAppAuth])
 
   const handleSwitchAccount = async (email: string) => {
     try {
@@ -242,19 +257,6 @@ function App() {
     }
   }
 
-  useEffect(() => {
-    fetchDisputes()
-      .then((res) => setDisputes(res.items.map(mapApiDisputeToUi)))
-      .catch(() => {})
-
-    fetchDocuments()
-      .then((res) => setDocuments(res.items.map(mapApiDocumentToUi)))
-      .catch(() => {})
-
-    fetchAuditEvents()
-      .then((res) => setAuditEvents(res.items.map(mapApiAuditEventToUi)))
-      .catch(() => {})
-  }, [])
 
 
   // Central AI Fetcher with Shared Cache
@@ -3068,8 +3070,8 @@ function AuditView() {
         subtitle="Cryptographic SHA-256 hash chain log of land acquisition workflow events."
       />
 
-      <div className="audit-health" style={{ borderColor: chainHealth?.chain_valid ? '#54a884' : '#df765b' }}>
-        <ShieldCheck size={20} style={{ color: chainHealth?.chain_valid ? '#54a884' : '#df765b' }} />
+      <div className="audit-health" style={{ borderColor: chainHealth ? (chainHealth.chain_valid ? '#54a884' : '#df765b') : '#f59e0b' }}>
+        <ShieldCheck size={20} style={{ color: chainHealth ? (chainHealth.chain_valid ? '#54a884' : '#df765b') : '#f59e0b' }} />
         <div>
           <strong>
             {chainHealth ? (chainHealth.chain_valid ? 'Cryptographic Hash Chain Valid' : 'Hash Chain Tampered / Broken') : 'Checking Hash Chain...'}
@@ -3080,10 +3082,11 @@ function AuditView() {
               : 'Verifying SHA-256 signatures in PostgreSQL...'}
           </span>
         </div>
-        <span className="status-label" style={{ background: chainHealth?.chain_valid ? '#54a884' : '#df765b' }}>
-          {chainHealth?.chain_valid ? 'VERIFIED' : 'INVALID'}
+        <span className="status-label" style={{ background: chainHealth ? (chainHealth.chain_valid ? '#54a884' : '#df765b') : '#f59e0b' }}>
+          {chainHealth ? (chainHealth.chain_valid ? 'VERIFIED' : 'INVALID') : 'CHECKING'}
         </span>
       </div>
+
 
       <div className="table-tools">
         <div className="inline-search">
