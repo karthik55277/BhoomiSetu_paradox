@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { Activity, AlertTriangle, ArrowLeft, ArrowRight, Bell, Check, CheckCircle2, ChevronDown, CircleHelp, Download, FileText, Layers, Landmark, LayoutDashboard, Map, Menu, RefreshCw, Search, Settings, ShieldCheck, Sparkles, Upload } from 'lucide-react'
 import {
   buildParcelRiskInput,
-  createDocumentMetadata,
+  deleteDocumentFile,
+  downloadDocumentFile,
+
   explainRisk,
   fetchAuditEvents,
   fetchCompensations,
@@ -23,6 +25,8 @@ import {
   mapGisFeatureToParcel,
   updateCompensation,
   updateDispute,
+  uploadDocumentFile,
+
   type ApiAiAnalysisRecord,
   type ApiGeoJSONFeature,
   type ApiParcelDetailResponse,
@@ -2600,11 +2604,11 @@ function DocumentsView({ notify }: { notify: (s: string) => void }) {
   const [registering, setRegistering] = useState(false)
   const [showModal, setShowModal] = useState(false)
 
-  // Registration Modal state
+  // File Upload Modal state
   const [regTitle, setRegTitle] = useState('')
   const [regCategory, setRegCategory] = useState('Survey Map')
   const [regParcelId, setRegParcelId] = useState('BR-042-0187')
-  const [regSizeMb, setRegSizeMb] = useState('2.4')
+  const [regFile, setRegFile] = useState<File | null>(null)
 
   const loadDocuments = async () => {
     setLoading(true)
@@ -2626,10 +2630,14 @@ function DocumentsView({ notify }: { notify: (s: string) => void }) {
     loadDocuments()
   }, [query, categoryFilter])
 
-  const handleRegisterDocument = async (e: React.FormEvent) => {
+  const handleUploadDocument = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!regTitle.trim()) {
       notify('Please enter a document title')
+      return
+    }
+    if (!regFile) {
+      notify('Please select a document file to upload')
       return
     }
 
@@ -2642,48 +2650,70 @@ function DocumentsView({ notify }: { notify: (s: string) => void }) {
         const parcelDetail = await fetchParcelDetail(regParcelId)
         parcelUuid = parcelDetail.raw.id
       } catch {
-        // Fallback if parcel detail resolution fails
+        // Fallback if parcel resolution fails
       }
 
-      const docCode = `DOC-${Date.now().toString().slice(-4)}`
-      const payload = {
-        document_code: docCode,
-        title: regTitle.trim(),
-        project_id: projectDetail.raw.id,
-        parcel_id: parcelUuid,
-        category: regCategory,
-        storage_path: `/storage/docs/${docCode.toLowerCase()}.pdf`,
-        file_size_bytes: Math.max(1024, Math.round((parseFloat(regSizeMb) || 1.0) * 1048576)),
-        mime_type: 'application/pdf',
-        verification_status: 'Verified',
+      const formData = new FormData()
+      formData.append('file', regFile)
+      formData.append('title', regTitle.trim())
+      formData.append('project_id', projectDetail.raw.id)
+      formData.append('category', regCategory)
+      if (parcelUuid) {
+        formData.append('parcel_id', parcelUuid)
       }
 
-      const created = await createDocumentMetadata(payload)
+      const created = await uploadDocumentFile(formData)
       const mapped = mapApiDocumentToUi(created)
 
       setDocuments((prev) => [mapped, ...prev])
-      notify(`Registered document metadata '${mapped.id}' in PostgreSQL · SHA-256 Audit Logged`)
+      notify(`Uploaded & stored '${mapped.title}' · SHA-256 Audit Logged`)
       setShowModal(false)
       setRegTitle('')
+      setRegFile(null)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Registration failed'
-      notify(`Document registration failed: ${msg}`)
+      const msg = err instanceof Error ? err.message : 'Upload failed'
+      notify(`Document upload failed: ${msg}`)
     } finally {
       setRegistering(false)
+    }
+  }
+
+  const handleDownload = async (doc: DocumentRecord) => {
+    try {
+      notify(`Downloading '${doc.title}'...`)
+      await downloadDocumentFile(doc.dbId || doc.id, `${doc.id}_${doc.title}`)
+      notify(`Download completed for '${doc.title}'`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Download failed'
+      notify(`Download failed: ${msg}`)
+    }
+  }
+
+  const handleDelete = async (doc: DocumentRecord) => {
+    if (!window.confirm(`Are you sure you want to delete '${doc.title}'? This action cannot be undone.`)) {
+      return
+    }
+    try {
+      await deleteDocumentFile(doc.dbId || doc.id)
+      setDocuments((prev) => prev.filter((d) => d.id !== doc.id && d.dbId !== doc.dbId))
+      notify(`Deleted document '${doc.title}' from storage & database`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Delete failed'
+      notify(`Delete failed: ${msg}`)
     }
   }
 
   return (
     <>
       <div className="demo-badge live" style={{ marginBottom: '12px' }}>
-        <span className="live-dot"></span> POSTGRES LIVE API
+        <span className="live-dot"></span> MINIO / LOCAL STORAGE ENGINE LIVE
       </div>
       <Heading
         title="Document Repository"
-        subtitle="Verified titles, survey maps, and valuation metadata records stored in PostgreSQL."
+        subtitle="Secure, storage-backed land titles, survey maps, and valuation records with streaming downloads and SHA-256 audit tracking."
         action={
           <Button className="primary-button" onClick={() => setShowModal(true)}>
-            <Upload size={14} /> Register Document Metadata
+            <Upload size={14} /> Upload Document File
           </Button>
         }
       />
@@ -2691,20 +2721,37 @@ function DocumentsView({ notify }: { notify: (s: string) => void }) {
       {showModal && (
         <div className="modal-backdrop" onClick={() => setShowModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px', padding: '24px' }}>
-            <h3>Register Document Metadata</h3>
+            <h3>Upload Document File</h3>
             <p style={{ fontSize: '11px', color: '#8a9998', marginBottom: '16px' }}>
-              Persist document metadata into PostgreSQL <code>document_records</code> table.
-              Generates cryptographic SHA-256 audit event on commit (physical binary storage out of scope).
+              Upload document payload to Object Storage Engine (MinIO/Local). Validates magic bytes & size (25MB limit),
+              stores metadata in PostgreSQL, and generates SHA-256 audit record.
             </p>
-            <form onSubmit={handleRegisterDocument} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <form onSubmit={handleUploadDocument} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <div>
                 <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Document Title</label>
                 <input
                   type="text"
                   value={regTitle}
                   onChange={(e) => setRegTitle(e.target.value)}
-                  placeholder="e.g. Survey Map · Parcel BR-042-0187"
+                  placeholder="e.g. Verified Cadastral Survey Map"
                   style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #c4d0ce' }}
+                  required
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Select File (.pdf, .png, .jpg, .tiff, .xml)</label>
+                <input
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg,.tiff,.xml,.txt,.csv"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] || null
+                    setRegFile(f)
+                    if (f && !regTitle) {
+                      setRegTitle(f.name.replace(/\.[^/.]+$/, ''))
+                    }
+                  }}
+                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #c4d0ce', background: 'var(--bg-card)' }}
                   required
                 />
               </div>
@@ -2740,23 +2787,12 @@ function DocumentsView({ notify }: { notify: (s: string) => void }) {
                 </div>
               </div>
 
-              <div>
-                <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Estimated File Size (MB)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={regSizeMb}
-                  onChange={(e) => setRegSizeMb(e.target.value)}
-                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #c4d0ce' }}
-                />
-              </div>
-
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
                 <Button type="button" className="outline-button" onClick={() => setShowModal(false)} disabled={registering}>
                   Cancel
                 </Button>
                 <Button type="submit" className="primary-button" disabled={registering}>
-                  {registering ? 'Registering...' : 'Confirm Registration'}
+                  {registering ? 'Uploading & Processing...' : 'Upload & Store'}
                 </Button>
               </div>
             </form>
@@ -2790,7 +2826,7 @@ function DocumentsView({ notify }: { notify: (s: string) => void }) {
         {loading ? (
           <div className="empty-state">
             <RefreshCw size={20} className="spinning" />
-            <strong>Loading document metadata from PostgreSQL...</strong>
+            <strong>Loading documents from PostgreSQL & Storage Engine...</strong>
           </div>
         ) : error ? (
           <div className="empty-state error">
@@ -2816,6 +2852,7 @@ function DocumentsView({ notify }: { notify: (s: string) => void }) {
                 <th>File Size</th>
                 <th>Verification Status</th>
                 <th>Date Uploaded</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -2825,7 +2862,7 @@ function DocumentsView({ notify }: { notify: (s: string) => void }) {
                     <strong>{doc.title}</strong>
                     {doc.storagePath && (
                       <small style={{ display: 'block', fontSize: '10px', color: '#8a9998', marginTop: '2px' }}>
-                        Path: <code>{doc.storagePath}</code>
+                        Key: <code>{doc.storagePath}</code>
                       </small>
                     )}
                   </td>
@@ -2836,6 +2873,26 @@ function DocumentsView({ notify }: { notify: (s: string) => void }) {
                     <span className={`risk-pill ${doc.status === 'Verified' ? 'low' : 'high'}`}>{doc.status}</span>
                   </td>
                   <td>{doc.uploadedAt}</td>
+                  <td>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <Button
+                        className="outline-button"
+                        style={{ padding: '4px 8px', fontSize: '12px' }}
+                        onClick={() => handleDownload(doc)}
+                        title="Download Document"
+                      >
+                        <Download size={13} /> Stream
+                      </Button>
+                      <Button
+                        className="outline-button"
+                        style={{ padding: '4px 8px', fontSize: '12px', color: '#ef4444', borderColor: 'rgba(239,68,68,0.3)' }}
+                        onClick={() => handleDelete(doc)}
+                        title="Delete Document"
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -2847,6 +2904,7 @@ function DocumentsView({ notify }: { notify: (s: string) => void }) {
 }
 
 function AuditView() {
+
   const [query, setQuery] = useState('')
   const [actionFilter, setActionFilter] = useState('All')
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([])

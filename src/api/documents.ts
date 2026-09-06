@@ -1,4 +1,4 @@
-import { requestJson } from './client'
+import { API_BASE_URL, ApiError, requestJson } from './client'
 import type { DocumentRecord } from '../data'
 
 export interface ApiDocumentResponse {
@@ -61,6 +61,61 @@ export async function fetchDocuments(params?: FetchDocumentsParams): Promise<Api
   const endpoint = `/api/v1/documents${queryString ? `?${queryString}` : ''}`
 
   return requestJson<ApiDocumentsPaginatedResponse>(endpoint)
+}
+
+export async function uploadDocumentFile(formData: FormData): Promise<ApiDocumentResponse> {
+  const token = localStorage.getItem('bhoomisetu_token')
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
+  const response = await fetch(`${API_BASE_URL}/api/v1/documents/upload`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  })
+
+  if (!response.ok) {
+    let detail = `Upload failed (${response.status})`
+    try {
+      const err = await response.json()
+      if (err?.detail) detail = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail)
+    } catch {}
+    throw new ApiError(detail, response.status, detail)
+  }
+
+  return response.json()
+}
+
+export async function downloadDocumentFile(docId: string, filename: string): Promise<void> {
+  const token = localStorage.getItem('bhoomisetu_token')
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
+  const response = await fetch(`${API_BASE_URL}/api/v1/documents/${docId}/download`, {
+    method: 'GET',
+    headers,
+  })
+
+  if (!response.ok) {
+    let detail = `Download failed (${response.status})`
+    try {
+      const err = await response.json()
+      if (err?.detail) detail = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail)
+    } catch {}
+    throw new ApiError(detail, response.status, detail)
+  }
+
+  const blob = await response.blob()
+  const blobUrl = window.URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = blobUrl
+  a.download = filename || 'document'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  window.URL.revokeObjectURL(blobUrl)
+}
+
+export async function deleteDocumentFile(docId: string): Promise<{ message: string; id: string }> {
+  return requestJson<{ message: string; id: string }>(`/api/v1/documents/${docId}`, {
+    method: 'DELETE',
+  })
 }
 
 export async function createDocumentMetadata(payload: DocumentCreatePayload): Promise<ApiDocumentResponse> {
