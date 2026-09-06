@@ -1,5 +1,6 @@
 export type Parcel = {
   id: string
+  dbId?: string
   survey: string
   district: string
   area: string
@@ -16,6 +17,7 @@ export type Parcel = {
   project: string
   value: string
   dispute: boolean
+  current_ai_result?: any
 }
 
 export type DisputeRecord = {

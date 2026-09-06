@@ -31,7 +31,7 @@ import {
   type ParcelAnalysisCache,
   type RiskPredictionResponse,
 } from './api'
-import { getRiskLabel, initialAuditEvents, initialCompensations, initialDisputes, initialDocuments, parcels, projects, stages, type AuditEvent, type CompensationRecord, type DisputeRecord, type DocumentRecord, type Parcel } from './data'
+import { getRiskLabel, initialAuditEvents, initialDisputes, initialDocuments, parcels, projects, stages, type AuditEvent, type CompensationRecord, type DisputeRecord, type DocumentRecord, type Parcel } from './data'
 import './App.css'
 
 
@@ -108,7 +108,6 @@ function App() {
 
   // Session-persistent datasets
   const [disputes, setDisputes] = useState<DisputeRecord[]>(initialDisputes)
-  const [compensations, setCompensations] = useState<CompensationRecord[]>(initialCompensations)
   const [documents, setDocuments] = useState<DocumentRecord[]>(initialDocuments)
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>(initialAuditEvents)
   const [selectedProjectTab, setSelectedProjectTab] = useState<Record<string, string>>({})
@@ -127,10 +126,6 @@ function App() {
   useEffect(() => {
     fetchDisputes()
       .then((res) => setDisputes(res.items.map(mapApiDisputeToUi)))
-      .catch(() => {})
-
-    fetchCompensations()
-      .then((res) => setCompensations(res.items.map(mapApiCompensationToUi)))
       .catch(() => {})
 
     fetchDocuments()
@@ -378,7 +373,6 @@ function App() {
             getOrFetchParcelAnalysis={getOrFetchParcelAnalysis}
             analyzingMap={analyzingMap}
             disputes={disputes}
-            compensations={compensations}
             documents={documents}
             auditEvents={auditEvents}
             gisLayers={gisLayers}
@@ -408,7 +402,6 @@ function Page({
   getOrFetchParcelAnalysis,
   analyzingMap,
   disputes,
-  compensations,
   documents,
   auditEvents,
   gisLayers,
@@ -426,7 +419,6 @@ function Page({
   getOrFetchParcelAnalysis: (p: Parcel, force?: boolean) => Promise<ParcelAnalysis>
   analyzingMap: Record<string, boolean>
   disputes: DisputeRecord[]
-  compensations: CompensationRecord[]
   documents: DocumentRecord[]
   auditEvents: AuditEvent[]
   gisLayers: { landBoundary: boolean; riverBuffer: boolean; roadCorridor: boolean; highRiskOverlay: boolean }
@@ -469,9 +461,9 @@ function Page({
   if (route === '/compensation') return <CompensationView notify={notify} />
   if (route === '/documents') return <DocumentsView notify={notify} />
   if (route === '/audit') return <AuditView />
-  if (route === '/analytics') return <AnalyticsView aiCache={aiCache} disputes={disputes} compensations={compensations} />
+  if (route === '/analytics') return <AnalyticsView />
   if (route === '/settings') return <SettingsView notify={notify} />
-  return <Dashboard navigate={navigate} openParcel={openParcel} aiCache={aiCache} disputes={disputes} compensations={compensations} auditEvents={auditEvents} />
+  return <Dashboard navigate={navigate} openParcel={openParcel} aiCache={aiCache} />
 }
 
 function Heading({ eyebrow, title, subtitle, action }: { eyebrow?: string; title: string; subtitle: string; action?: React.ReactNode }) {
@@ -491,40 +483,110 @@ function Dashboard({
   navigate,
   openParcel,
   aiCache,
-  disputes,
-  compensations,
-  auditEvents,
 }: {
   navigate: (s: string) => void
   openParcel: (p: Parcel) => void
   aiCache: ParcelAnalysisCache
-  disputes: DisputeRecord[]
-  compensations: CompensationRecord[]
-  auditEvents: AuditEvent[]
 }) {
-  const highRiskCount = parcels.filter((p) => {
-    const cached = aiCache[p.id]
-    const score = cached ? cached.prediction.risk_score : p.risk
-    return score > 60
-  }).length
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [isLiveMode, setIsLiveMode] = useState(true)
 
-  const openDisputeCount = disputes.filter((d) => d.status !== 'Resolved').length
-  const totalComp = compensations.reduce((acc, c) => acc + c.rawAmount, 0)
+  const [liveProjectsCount, setLiveProjectsCount] = useState<number>(projects.length)
+  const [liveParcels, setLiveParcels] = useState<Parcel[]>(parcels)
+  const [totalParcelsCount, setTotalParcelsCount] = useState<number>(parcels.length)
+  const [liveDisputes, setLiveDisputes] = useState<DisputeRecord[]>([])
+  const [totalDisputesCount, setTotalDisputesCount] = useState<number>(0)
+  const [liveCompensations, setLiveCompensations] = useState<CompensationRecord[]>([])
+  const [liveAuditEvents, setLiveAuditEvents] = useState<AuditEvent[]>([])
+
+  const loadDashboardMetrics = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const [projRes, parcelsRes, disputesRes, compRes, auditRes] = await Promise.all([
+        fetchProjects(),
+        fetchParcels({ page_size: 100 }),
+        fetchDisputes({ page_size: 100 }),
+        fetchCompensations({ page_size: 100 }),
+        fetchAuditEvents({ page_size: 5 }),
+      ])
+
+      setLiveProjectsCount(projRes.ui.length)
+      setLiveParcels(parcelsRes.ui)
+      setTotalParcelsCount(parcelsRes.total)
+
+      setLiveDisputes(disputesRes.items.map(mapApiDisputeToUi))
+      setTotalDisputesCount(disputesRes.total)
+
+      setLiveCompensations(compRes.items.map(mapApiCompensationToUi))
+      setLiveAuditEvents(auditRes.items.map(mapApiAuditEventToUi))
+      setIsLiveMode(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch live dashboard metrics.')
+      setIsLiveMode(false)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadDashboardMetrics()
+  }, [])
+
+  // Explicit High Risk definition: HIGH or CRITICAL risk level (risk_score > 60)
+  const highRiskParcels = liveParcels.filter((p) => {
+    const cached = aiCache[p.id]
+    const riskLevel = p.current_ai_result?.prediction?.risk_level
+    if (riskLevel === 'HIGH' || riskLevel === 'CRITICAL') return true
+    const score = cached ? cached.prediction.risk_score : (p.current_ai_result?.prediction?.risk_score ?? p.risk)
+    return score > 60
+  })
+
+  const openDisputeCount = liveDisputes.filter((d) => d.status !== 'Resolved').length
+  const totalComp = liveCompensations.reduce((acc, c) => acc + c.rawAmount, 0)
   const totalCompFormatted = `Rs ${(totalComp / 10000000).toFixed(1)} Cr`
 
   const kpiData: [string, string | number, string, string][] = [
-    ['Projects', projects.length, '/projects', 'teal'],
-    ['Parcels', parcels.length, '/parcels', 'amber'],
-    ['High risk', highRiskCount, '/gis', 'red'],
-    ['Disputes', openDisputeCount, '/disputes', 'violet'],
+    ['Projects', liveProjectsCount, '/projects', 'teal'],
+    ['Parcels', totalParcelsCount, '/parcels', 'amber'],
+    ['High risk', highRiskParcels.length, '/gis', 'red'],
+    ['Disputes', totalDisputesCount, '/disputes', 'violet'],
     ['Compensation', totalCompFormatted, '/compensation', 'blue'],
   ]
 
-  const priorityParcel = parcels.find((p) => p.id === 'BR-042-0187') || parcels[0]
+  // Dynamically derive priority attention parcel from live risk scores
+  const priorityParcel = useMemo(() => {
+    if (liveParcels.length === 0) return parcels[0]
+    return [...liveParcels].sort((a, b) => {
+      const scoreA = aiCache[a.id]?.prediction.risk_score ?? a.current_ai_result?.prediction.risk_score ?? a.risk
+      const scoreB = aiCache[b.id]?.prediction.risk_score ?? b.current_ai_result?.prediction.risk_score ?? b.risk
+      return scoreB - scoreA
+    })[0]
+  }, [liveParcels, aiCache])
 
   return (
     <>
-      <Heading eyebrow="SEPTEMBER 2026 · PATNA DISTRICT OPERATIONS" title="Good morning, Officer" subtitle={`${disputes.length} disputes and ${highRiskCount} high-risk parcels require attention in Patna.`} action={<Button className="primary-button" onClick={() => navigate('/projects')}>+ View Projects</Button>} />
+      <Heading
+        eyebrow="SEPTEMBER 2026 · PATNA DISTRICT OPERATIONS"
+        title="Good morning, Officer"
+        subtitle={`${openDisputeCount} open disputes and ${highRiskParcels.length} high-risk parcels require attention in Patna.`}
+        action={
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            {isLiveMode ? (
+              <span className="live-pill">POSTGRES LIVE API</span>
+            ) : (
+              <span className="live-pill fallback" title={error || undefined}>DEMO FALLBACK</span>
+            )}
+            <Button className="quiet-button" onClick={loadDashboardMetrics} disabled={loading}>
+              <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh
+            </Button>
+            <Button className="primary-button" onClick={() => navigate('/projects')}>
+              + View Projects
+            </Button>
+          </div>
+        }
+      />
       <section className="kpi-grid">
         {kpiData.map(([label, value, path, color]) => (
           <Button key={label} className="kpi-card" onClick={() => navigate(path)}>
@@ -542,7 +604,7 @@ function Dashboard({
         <AlertTriangle size={17} />
         <div>
           <strong>Priority attention</strong>
-          <span>BR-042-0187 has a high acquisition risk score and an open boundary dispute.</span>
+          <span>{priorityParcel.id} has a high acquisition risk score and requires review.</span>
         </div>
         <Button onClick={() => openParcel(priorityParcel)}>
           Review parcel <ArrowRight size={14} />
@@ -554,13 +616,13 @@ function Dashboard({
           <div className="panel-head">
             <div>
               <h3>Live GIS map overview</h3>
-              <p>{parcels.length} candidate parcels in scope · Click a parcel to inspect</p>
+              <p>{totalParcelsCount} candidate parcels in scope · Click a parcel to inspect</p>
             </div>
             <Button className="quiet-button" onClick={() => navigate('/gis')}>
               Open GIS Command <ArrowRight size={14} />
             </Button>
           </div>
-          <MiniMap openParcel={openParcel} aiCache={aiCache} />
+          <MiniMap parcels={liveParcels} openParcel={openParcel} aiCache={aiCache} />
         </div>
 
         <div className="panel">
@@ -575,7 +637,7 @@ function Dashboard({
               <span className="risk-pill high">HIGH</span>
               <div>
                 <strong>Ownership objection</strong>
-                <small>BR-042-0187 · Due today</small>
+                <small>{priorityParcel.id} · Priority review</small>
               </div>
               <ArrowRight size={14} />
             </Button>
@@ -583,12 +645,12 @@ function Dashboard({
               <span className="risk-pill medium">{openDisputeCount}</span>
               <div>
                 <strong>Open disputes</strong>
-                <small>{disputes.filter((d) => d.status === 'Escalated').length} escalated for review</small>
+                <small>{liveDisputes.filter((d) => d.status === 'Escalated').length} escalated for review</small>
               </div>
               <ArrowRight size={14} />
             </Button>
             <Button onClick={() => navigate('/compensation')}>
-              <span className="risk-pill info">{compensations.length}</span>
+              <span className="risk-pill info">{liveCompensations.length}</span>
               <div>
                 <strong>Payments pending</strong>
                 <small>{totalCompFormatted} across projects</small>
@@ -603,14 +665,14 @@ function Dashboard({
         <div className="panel-head">
           <div>
             <h3>Recent activity stream</h3>
-            <p>Demo audit chain events recorded in current session</p>
+            <p>Live audit chain events recorded in database</p>
           </div>
           <Button className="quiet-button" onClick={() => navigate('/audit')}>
             View full audit trail <ArrowRight size={14} />
           </Button>
         </div>
         <div className="activity-list">
-          {auditEvents.slice(0, 3).map((event) => (
+          {liveAuditEvents.slice(0, 3).map((event) => (
             <ActivityRow key={event.id} icon={event.title.includes('AI') ? <Sparkles size={14} /> : event.title.includes('Objection') ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />} text={event.title} meta={`${event.actor} · ${event.timestamp}`} />
           ))}
         </div>
@@ -631,15 +693,15 @@ function ActivityRow({ icon, text, meta }: { icon: React.ReactNode; text: string
   )
 }
 
-function MiniMap({ openParcel, aiCache }: { openParcel: (p: Parcel) => void; aiCache: ParcelAnalysisCache }) {
+function MiniMap({ parcels: mapParcels, openParcel, aiCache }: { parcels: Parcel[]; openParcel: (p: Parcel) => void; aiCache: ParcelAnalysisCache }) {
   return (
     <div className="map-canvas mini-map">
       <div className="map-label">Ganga river</div>
       <div className="road road-a"></div>
       <div className="road road-b"></div>
-      {parcels.map((p) => {
+      {mapParcels.map((p) => {
         const cached = aiCache[p.id]
-        const score = cached ? Math.round(cached.prediction.risk_score) : p.risk
+        const score = cached ? Math.round(cached.prediction.risk_score) : (p.current_ai_result ? Math.round(p.current_ai_result.prediction.risk_score) : p.risk)
         const color = score > 60 ? '#d8634d' : score > 30 ? '#e9a23b' : '#54a884'
         return (
           <button key={p.id} aria-label={`Open ${p.id}`} className="parcel" style={{ left: `${p.x}%`, top: `${p.y}%`, background: color }} onClick={() => openParcel(p)}>
@@ -2831,30 +2893,81 @@ function AuditView() {
   )
 }
 
-function AnalyticsView({
-  aiCache,
-  disputes,
-  compensations,
-}: {
-  aiCache: ParcelAnalysisCache
-  disputes: DisputeRecord[]
-  compensations: CompensationRecord[]
-}) {
-  const analyzedCount = Object.keys(aiCache).length
-  const totalCompRaw = compensations.reduce((acc, c) => acc + c.rawAmount, 0)
-  const openDisputes = disputes.filter((d) => d.status !== 'Resolved').length
+function AnalyticsView() {
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [isLiveMode, setIsLiveMode] = useState(true)
+
+  const [analyzedCount, setAnalyzedCount] = useState<number>(1)
+  const [totalParcelsCount, setTotalParcelsCount] = useState<number>(5)
+  const [openDisputes, setOpenDisputes] = useState<number>(1)
+  const [totalCompRaw, setTotalCompRaw] = useState<number>(0)
+  const [documentsCount, setDocumentsCount] = useState<number>(0)
+  const [chainValid, setChainValid] = useState<boolean | null>(null)
+
+  const loadAnalyticsMetrics = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const [parcelsRes, disputesRes, compRes, docRes, auditRes] = await Promise.all([
+        fetchParcels({ page_size: 100 }),
+        fetchDisputes({ page_size: 100 }),
+        fetchCompensations({ page_size: 100 }),
+        fetchDocuments({ page_size: 100 }),
+        fetchAuditEvents({ page_size: 1 }),
+      ])
+
+      const mappedDisputes = disputesRes.items.map(mapApiDisputeToUi)
+      const mappedCompensations = compRes.items.map(mapApiCompensationToUi)
+
+      setTotalParcelsCount(parcelsRes.total)
+      setAnalyzedCount(parcelsRes.ui.filter((p) => p.current_ai_result !== null && p.current_ai_result !== undefined).length)
+      setOpenDisputes(mappedDisputes.filter((d) => d.status !== 'Resolved').length)
+      setTotalCompRaw(mappedCompensations.reduce((acc, c) => acc + c.rawAmount, 0))
+      setDocumentsCount(docRes.total)
+      setChainValid(auditRes.chain_health?.chain_valid ?? null)
+      setIsLiveMode(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch analytics live metrics.')
+      setIsLiveMode(false)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadAnalyticsMetrics()
+  }, [])
 
   return (
     <>
-      <Heading title="Portfolio Analytics & Intelligence" subtitle="Derived metrics combining seeded land datasets & live ML evaluation state." />
+      <Heading
+        title="Portfolio Analytics & Intelligence"
+        subtitle="Derived operational metrics combining PostgreSQL live endpoints & SHA-256 audit chain status."
+        action={
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            {isLiveMode ? (
+              <span className="live-pill">POSTGRES LIVE API</span>
+            ) : (
+              <span className="live-pill fallback" title={error || undefined}>DEMO FALLBACK</span>
+            )}
+            <Button className="quiet-button" onClick={loadAnalyticsMetrics} disabled={loading}>
+              <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh
+            </Button>
+          </div>
+        }
+      />
 
       <div className="analytics-grid">
         <div className="panel chart-panel">
-          <div className="panel-head">
+          <div className="panel-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <h3>Risk Tier Distribution</h3>
-              <p>Calculated across portfolio scope</p>
+              <p>Macro portfolio tier projection</p>
             </div>
+            <span className="live-pill" style={{ background: '#f5f7f6', color: '#687b80', borderColor: '#dce8e1' }}>
+              DEMO / PORTFOLIO PROJECTION
+            </span>
           </div>
           <div className="bars">
             {[
@@ -2877,17 +2990,17 @@ function AnalyticsView({
         <div className="panel">
           <div className="panel-head">
             <div>
-              <h3>Live Session Summary Metrics</h3>
-              <p>Real-time app statistics</p>
+              <h3>Live Operational Summary Metrics</h3>
+              <p>Real-time statistics from PostgreSQL endpoints</p>
             </div>
           </div>
 
           <div className="summary-row">
             <span>
               <strong>ML Analyzed Parcels</strong>
-              <small>Evaluated via FastAPI endpoint</small>
+              <small>Evaluated via FastAPI ML endpoints</small>
             </span>
-            <b>{analyzedCount} / 5</b>
+            <b>{analyzedCount} / {totalParcelsCount} live parcels</b>
           </div>
 
           <div className="summary-row">
@@ -2904,6 +3017,24 @@ function AnalyticsView({
               <small>Across pending & ready records</small>
             </span>
             <b>Rs {(totalCompRaw / 10000000).toFixed(1)} Cr</b>
+          </div>
+
+          <div className="summary-row">
+            <span>
+              <strong>Document Repository Count</strong>
+              <small>Verified document metadata rows</small>
+            </span>
+            <b>{documentsCount} documents</b>
+          </div>
+
+          <div className="summary-row">
+            <span>
+              <strong>Cryptographic Hash Chain Health</strong>
+              <small>SHA-256 tamper-evident integrity</small>
+            </span>
+            <b style={{ color: chainValid === true ? '#54a884' : chainValid === false ? '#d8634d' : '#294b55' }}>
+              {chainValid === true ? 'Valid (SHA-256)' : chainValid === false ? 'Broken / Compromised' : 'Checking...'}
+            </b>
           </div>
         </div>
       </div>

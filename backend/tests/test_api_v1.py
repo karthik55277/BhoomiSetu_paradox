@@ -323,3 +323,65 @@ def test_audit_live_stream_aggregation():
     assert "COMPENSATION_UPDATE" in action_types
     assert "DOCUMENT_CREATE" in action_types
 
+
+@skip_if_no_db
+def test_dashboard_analytics_live_metrics():
+    """
+    Test Phase 2.5.7 Dashboard & Analytics backend metrics endpoints.
+    Verifies that all required operational endpoints return 200 OK, valid backend `total`
+    fields, and that pagination total differs from page items length.
+    """
+    # 1. Projects
+    proj_res = client.get("/api/v1/projects")
+    assert proj_res.status_code == 200
+    projects_list = proj_res.json()
+    assert isinstance(projects_list, list)
+    assert len(projects_list) >= 3
+
+    # 2. Parcels paginated (small page size to test total vs items length)
+    parcels_res = client.get("/api/v1/parcels?page=1&page_size=2")
+    assert parcels_res.status_code == 200
+    parcels_data = parcels_res.json()
+    assert "total" in parcels_data
+    assert "items" in parcels_data
+    assert parcels_data["total"] >= 5
+    assert len(parcels_data["items"]) == 2
+    # Verify items.length != total (crucial pagination total safeguard!)
+    assert len(parcels_data["items"]) != parcels_data["total"]
+
+    # 3. High Risk parcel filtering
+    high_risk_res = client.get("/api/v1/parcels?risk_level=HIGH")
+    assert high_risk_res.status_code == 200
+    high_risk_data = high_risk_res.json()
+    assert "total" in high_risk_data
+
+    # 4. Disputes paginated
+    disp_res = client.get("/api/v1/disputes?page=1&page_size=10")
+    assert disp_res.status_code == 200
+    disp_data = disp_res.json()
+    assert "total" in disp_data
+    assert disp_data["total"] >= 1
+
+    # 5. Compensation paginated
+    comp_res = client.get("/api/v1/compensation?page=1&page_size=10")
+    assert comp_res.status_code == 200
+    comp_data = comp_res.json()
+    assert "total" in comp_data
+    assert comp_data["total"] >= 1
+
+    # 6. Documents paginated
+    doc_res = client.get("/api/v1/documents?page=1&page_size=10")
+    assert doc_res.status_code == 200
+    doc_data = doc_res.json()
+    assert "total" in doc_data
+    assert doc_data["total"] >= 1
+
+    # 7. Audit stream and hash chain health
+    audit_res = client.get("/api/v1/audit?page=1&page_size=5")
+    assert audit_res.status_code == 200
+    audit_data = audit_res.json()
+    assert "chain_health" in audit_data
+    assert audit_data["chain_health"]["chain_valid"] is True
+    assert audit_data["chain_health"]["event_count"] >= 1
+
+

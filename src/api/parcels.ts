@@ -115,9 +115,11 @@ export function mapApiParcelToUi(apiParcel: ApiParcelResponse | ApiParcelDetailR
 
   const riskScore = Math.round(apiParcel.baseline_risk_score)
   const color = riskScore > 60 ? '#d8634d' : riskScore > 30 ? '#e9a23b' : '#54a884'
+  const currentAi = ('current_ai_result' in apiParcel) ? apiParcel.current_ai_result : null
 
   return {
     id: apiParcel.parcel_id,
+    dbId: apiParcel.id,
     survey: apiParcel.survey_number,
     district: apiParcel.district,
     area: `${apiParcel.land_area_ha.toFixed(2)} ha`,
@@ -134,6 +136,7 @@ export function mapApiParcelToUi(apiParcel: ApiParcelResponse | ApiParcelDetailR
     project: apiParcel.project_code || 'NH-327 Ring Road',
     value: formatCurrencyCrores(apiParcel.land_value_inr),
     dispute: hasDispute,
+    current_ai_result: currentAi,
   }
 }
 
