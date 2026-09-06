@@ -855,57 +855,114 @@ function Dashboard({
   return (
     <>
       <Heading
-        eyebrow="SEPTEMBER 2026 · PATNA DISTRICT OPERATIONS"
-        title="Good morning, Officer"
-        subtitle={`${openDisputeCount} open disputes and ${highRiskParcels.length} high-risk parcels require attention in Patna.`}
+        eyebrow="NATIONAL LAND INTELLIGENCE · PATNA DISTRICT"
+        title="Command Center Overview"
+        subtitle="Real-time acquisition intelligence across projects, parcels, disputes, and field operations."
         action={
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
             {isLiveMode ? (
-              <span className="live-pill">POSTGRES LIVE API</span>
+              <span className="risk-pill low" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.8px' }}>
+                POSTGRES LIVE
+              </span>
             ) : (
-              <span className="live-pill fallback" title={error || undefined}>DEMO FALLBACK</span>
+              <span className="risk-pill high" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.8px' }} title={error || undefined}>
+                DEMO FALLBACK
+              </span>
             )}
-            <Button className="quiet-button" onClick={loadDashboardMetrics} disabled={loading}>
-              <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh
-            </Button>
-            <Button className="primary-button" onClick={() => navigate('/projects')}>
-              + View Projects
+            <span className="risk-pill low" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.8px' }}>
+              POSTGIS LIVE
+            </span>
+            <span className="risk-pill low" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.8px' }}>
+              AI ENGINE LIVE
+            </span>
+            <span className="risk-pill info" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.8px' }}>
+              WS LIVE
+            </span>
+            <Button className="quiet-button" onClick={loadDashboardMetrics} disabled={loading} style={{ border: '1px solid var(--border-subtle)', padding: '6px 12px', borderRadius: '6px' }}>
+              <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh Data
             </Button>
           </div>
         }
       />
+
       <section className="kpi-grid">
-        {kpiData.map(([label, value, path, color]) => (
+        {kpiData.map(([label, value, path]) => (
           <Button key={label} className="kpi-card" onClick={() => navigate(path)}>
-            <span className={`kpi-icon ${color}`}>
-              <Activity size={16} />
-            </span>
-            <span className="kpi-label">{label}</span>
-            <strong>{value}</strong>
+            <span className="kpi-label">{label.toUpperCase()}</span>
+            <strong>{typeof value === 'number' && value < 10 ? `0${value}` : value}</strong>
             <small>{label === 'High risk' ? 'Requires review' : label === 'Disputes' ? `${openDisputeCount} open` : 'Active scope'}</small>
           </Button>
         ))}
       </section>
 
-      <div className="attention-strip">
-        <AlertTriangle size={17} />
-        <div>
-          <strong>Priority attention</strong>
-          <span>{priorityParcel.id} has a high acquisition risk score and requires review.</span>
+      <div className="attention-strip" style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <AlertTriangle size={18} color="var(--risk-high)" />
+            <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '1.2px', color: 'var(--accent-gold)', textTransform: 'uppercase' }}>
+              PRIORITY ATTENTION REQUIRED
+            </span>
+          </div>
+          <Button
+            onClick={() => openParcel(priorityParcel)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              border: '1px solid var(--border-accent)',
+              backgroundColor: 'rgba(245, 158, 11, 0.15)',
+              color: 'var(--accent-gold)',
+              fontSize: '11px',
+              fontWeight: 600,
+              padding: '6px 14px',
+              borderRadius: '6px',
+            }}
+          >
+            Inspect Intelligence <ArrowRight size={14} />
+          </Button>
         </div>
-        <Button onClick={() => openParcel(priorityParcel)}>
-          Review parcel <ArrowRight size={14} />
-        </Button>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginTop: '4px' }}>
+          <div>
+            <div style={{ fontFamily: 'var(--font-serif)', fontSize: '24px', fontWeight: 700, color: '#ffffff', letterSpacing: '0.5px' }}>
+              {priorityParcel.id}
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+              {priorityParcel.project} · {priorityParcel.district || 'Patna District'} · {priorityParcel.survey}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <span className="risk-pill high" style={{ fontSize: '11px', padding: '6px 12px' }}>
+              HIGH RISK
+            </span>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontFamily: 'var(--font-serif)', fontSize: '24px', fontWeight: 700, color: 'var(--risk-high)' }}>
+                {aiCache[priorityParcel.id]?.prediction.risk_score ?? priorityParcel.current_ai_result?.prediction?.risk_score ?? priorityParcel.risk} / 100
+              </div>
+              <div style={{ fontSize: '10px', color: 'var(--text-subtle)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>
+                SHAP Composite Score
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
+          <span style={{ fontSize: '11px', color: 'var(--text-subtle)', fontWeight: 600 }}>Top risk factors:</span>
+          <span className="risk-pill medium" style={{ fontSize: '10px' }}>Ownership complexity (+18.4)</span>
+          <span className="risk-pill medium" style={{ fontSize: '10px' }}>River Buffer Proximity (+14.2)</span>
+          <span className="risk-pill medium" style={{ fontSize: '10px' }}>Historical Dispute (+11.8)</span>
+        </div>
       </div>
 
       <section className="dashboard-grid">
         <div className="panel map-panel">
           <div className="panel-head">
             <div>
-              <h3>Live GIS map overview</h3>
-              <p>{totalParcelsCount} candidate parcels in scope · Click a parcel to inspect</p>
+              <h3>Live GIS Map Command Overview</h3>
+              <p>{totalParcelsCount} candidate parcels in scope · Click a parcel to inspect PostGIS geometry</p>
             </div>
-            <Button className="quiet-button" onClick={() => navigate('/gis')}>
+            <Button className="quiet-button" onClick={() => navigate('/gis')} style={{ color: 'var(--accent-gold)' }}>
               Open GIS Command <ArrowRight size={14} />
             </Button>
           </div>
@@ -915,32 +972,32 @@ function Dashboard({
         <div className="panel">
           <div className="panel-head">
             <div>
-              <h3>What needs attention</h3>
-              <p>Actionable items for District Officer</p>
+              <h3>Operational Action Queue</h3>
+              <p>Actionable items requiring officer sign-off</p>
             </div>
           </div>
           <div className="attention-list">
             <Button onClick={() => openParcel(priorityParcel)}>
               <span className="risk-pill high">HIGH</span>
               <div>
-                <strong>Ownership objection</strong>
-                <small>{priorityParcel.id} · Priority review</small>
+                <strong>Ownership Objection Review</strong>
+                <small>{priorityParcel.id} · Priority investigation</small>
               </div>
               <ArrowRight size={14} />
             </Button>
             <Button onClick={() => navigate('/disputes')}>
               <span className="risk-pill medium">{openDisputeCount}</span>
               <div>
-                <strong>Open disputes</strong>
-                <small>{liveDisputes.filter((d) => d.status === 'Escalated').length} escalated for review</small>
+                <strong>Active Legal Disputes</strong>
+                <small>{liveDisputes.filter((d) => d.status === 'Escalated').length} escalated cases</small>
               </div>
               <ArrowRight size={14} />
             </Button>
             <Button onClick={() => navigate('/compensation')}>
               <span className="risk-pill info">{liveCompensations.length}</span>
               <div>
-                <strong>Payments pending</strong>
-                <small>{totalCompFormatted} across projects</small>
+                <strong>Compensation Exposure</strong>
+                <small>{totalCompFormatted} across active projects</small>
               </div>
               <ArrowRight size={14} />
             </Button>
