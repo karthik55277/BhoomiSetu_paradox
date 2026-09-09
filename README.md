@@ -362,5 +362,5 @@ npm run build
 ---
 
 ## 👥 Team
-- **Team Name**: The Mavericks
+- **Team Name**: PARADOX
 - **Event**: Smart India Hackathon (SIH)
